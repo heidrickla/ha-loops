@@ -1,0 +1,49 @@
+# ha-loops
+
+Home Assistant add-on hosting the recurring improvement loops, so they run on the
+always-on system rather than on a desktop.
+
+| Loop | What runs nightly | What persists |
+|---|---|---|
+| Health checks | core and add-on updates, Supervisor issues, backup age, host disk, unavailable-entity delta, core log errors, Uptime Kuma monitors down | `/data/findings/<date>.json`, `latest.json`, `history.json`; a summary to the phone |
+| Override corpus | the last day of the logbook, every manual change that undid an automation's change within the window | `/data/overrides.jsonl`, daily automation fire counts, the ranking on the panel and at `/api/overrides.json` |
+
+Rule for the check suite: a finding that is fixed leaves its check behind. The
+suite only grows.
+
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `loops/config.yaml` | add-on manifest: `hassio_role: manager`, `homeassistant_api`, ingress on 8095 |
+| `loops/server.py` | scheduler, store, ingress server, `/api/run` (POST) to run now |
+| `loops/checks.py` | the check suite; each check returns findings, a failing check is itself a finding |
+| `loops/overrides.py` | override detection and the corpus |
+| `loops/page.py` | the dark ingress page |
+| `tests/` | the suite against a fake Supervisor, the server end to end |
+
+## Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `run_at` | `03:30` | local time of the nightly run |
+| `notify_target` | empty | notify service name for the summary |
+| `override_window_s` | 300 | manual change this soon after an automation's counts as an override |
+| `backup_max_age_days` | 7 | older newest backup is a finding |
+| `disk_warn_percent` | 85 | host disk threshold |
+| `unavailable_warn_delta` | 25 | more unavailable entities than the last run by this many is a warning |
+| `log_lines` | 500 | core log lines scanned |
+| `kuma_url`, `kuma_api_key` | empty | optional; down monitors become findings |
+
+## Endpoints
+
+`/` the page, `/healthz`, `/api/latest.json`, `/api/overrides.json`, `/api/history.json`, `POST /api/run`.
+
+## Develop
+
+```
+python -m pytest -q tests
+python -m ruff check . && python -m ruff format --check .
+```
+
+Deploy to a local add-on directory: `git archive --format=tar HEAD loops | ssh root@<ha> 'tar -x -C /local_apps && ha store reload'`, then install or rebuild `local_loops`.

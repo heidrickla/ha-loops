@@ -1,0 +1,41 @@
+name: Loops
+version: "0.1.0"
+slug: loops
+description: Nightly health checks with findings that stay as checks, and the corpus of automations the household overrides
+url: https://github.com/heidrickla/ha-loops
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+stage: stable
+advanced: false
+homeassistant_api: true
+hassio_api: true
+hassio_role: manager
+ingress: true
+ingress_port: 8095
+panel_icon: mdi:sync-circle
+panel_title: Loops
+watchdog: http://[HOST]:[PORT:8095]/healthz
+options:
+  run_at: "03:30"
+  notify_target: ""
+  override_window_s: 300
+  backup_max_age_days: 7
+  disk_warn_percent: 85
+  unavailable_warn_delta: 25
+  log_lines: 500
+  kuma_url: ""
+  kuma_api_key: ""
+schema:
+  run_at: match(^([01]\d|2[0-3]):[0-5]\d$)
+  notify_target: str?
+  override_window_s: int(30,3600)?
+  backup_max_age_days: int(1,90)?
+  disk_warn_percent: int(50,99)?
+  unavailable_warn_delta: int(1,1000)?
+  log_lines: int(100,5000)?
+  kuma_url: url?
+  kuma_api_key: password?

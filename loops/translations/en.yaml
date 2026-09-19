@@ -1,0 +1,28 @@
+configuration:
+  run_at:
+    name: Run at
+    description: Local time of the nightly run, HH:MM.
+  notify_target:
+    name: Notify target
+    description: notify service name for the summary, e.g. mobile_app_pixel. Empty sends nothing.
+  override_window_s:
+    name: Override window (s)
+    description: A manual change this soon after an automation changed the same entity counts as an override.
+  backup_max_age_days:
+    name: Backup max age (days)
+    description: A newest backup older than this is a finding.
+  disk_warn_percent:
+    name: Disk warning (%)
+    description: Host disk use above this is a finding.
+  unavailable_warn_delta:
+    name: Unavailable delta
+    description: This many more unavailable or unknown entities than the previous run is a finding.
+  log_lines:
+    name: Core log lines
+    description: How many recent core log lines to scan for errors and warnings.
+  kuma_url:
+    name: Uptime Kuma URL
+    description: Optional. Down monitors become findings.
+  kuma_api_key:
+    name: Uptime Kuma API key
+    description: A key of its own for this add-on.

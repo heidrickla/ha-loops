@@ -1,0 +1,181 @@
+"""The check suite and the override corpus against a fake Supervisor; the server end to end."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import sys
+import threading
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import ClassVar
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "loops"))
+import checks
+import overrides as ov
+import server as srv
+
+NOW = dt.datetime(2026, 9, 20, 3, 30, tzinfo=dt.UTC)
+T0 = "2026-09-19T10:00:00+00:00"
+T1 = "2026-09-19T10:01:00+00:00"
+T2 = "2026-09-19T10:20:00+00:00"
+
+LOGBOOK = [
+    {"when": T0, "entity_id": "light.hall", "state": "on", "context_domain": "automation", "context_entity_id": "automation.hall_motion", "context_entity_id_name": "Hall motion"},
+    {"when": T1, "entity_id": "light.hall", "state": "off", "context_user_id": "afe0089f638c474293cfc56280e435f1", "context_domain": "light"},
+    {"when": T2, "entity_id": "light.hall", "state": "off", "context_user_id": "afe0089f638c474293cfc56280e435f1"},
+    {"when": T0, "entity_id": "automation.hall_motion", "domain": "automation", "name": "Hall motion", "state": None, "message": "triggered"},
+    {"when": T0, "entity_id": "switch.fan", "state": "on", "context_domain": "automation", "context_entity_id": "automation.fan"},
+]
+
+SUPERVISOR = {
+    "/core/info": {"version": "2026.9.1", "version_latest": "2026.9.2", "update_available": True},
+    "/addons": {
+        "addons": [
+            {"name": "Vaultwarden", "slug": "a0d7b954_bitwarden", "version": "0.28.2", "version_latest": "0.28.3", "update_available": True},
+            {"name": "SSH", "slug": "core_ssh", "update_available": False},
+        ]
+    },
+    "/resolution/info": {"issues": [{"type": "free_space", "context": "system", "reference": None, "uuid": "u1"}], "unhealthy": [], "unsupported": ["os_agent"]},
+    "/backups": {"backups": [{"date": "2026-09-01T00:00:00.000000+00:00"}, {"date": "2026-09-10T02:00:00.000000+00:00"}]},
+    "/host/info": {"disk_used": 44.0, "disk_total": 50.0},
+    "/core/api/states": [{"entity_id": "light.a", "state": "on"}, {"entity_id": "sensor.b", "state": "unavailable"}, {"entity_id": "sensor.c", "state": "unknown"}],
+}
+CORE_LOG = "2026-09-19 03:12:01.123 ERROR (Thread-7) [pychromecast.socket_client] Failed\n2026-09-19 03:12:02.000 WARNING (MainThread) [homeassistant.components.zha] slow\n2026-09-19 03:12:03.000 INFO (MainThread) [homeassistant.setup] fine\n"
+
+
+class FakeSupervisor(BaseHTTPRequestHandler):
+    posted: ClassVar[list] = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        if self.headers.get("Authorization") != "Bearer test-token":
+            self.send_response(401)
+            self.end_headers()
+            return
+        if path == "/core/logs":
+            body, ctype = CORE_LOG.encode(), "text/plain"
+        elif path.startswith("/core/api/logbook/"):
+            body, ctype = json.dumps(LOGBOOK).encode(), "application/json"
+        elif path in SUPERVISOR:
+            doc = SUPERVISOR[path]
+            body, ctype = json.dumps(doc if path.startswith("/core/api") else {"result": "ok", "data": doc}).encode(), "application/json"
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        FakeSupervisor.posted.append((self.path, json.loads(self.rfile.read(length) or b"{}")))
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"[]")
+
+
+@pytest.fixture
+def supervisor():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeSupervisor)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    FakeSupervisor.posted.clear()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def options(**extra) -> dict:
+    return {"run_at": "03:30", "notify_target": "mobile_app_test", "override_window_s": 300, "backup_max_age_days": 7, "disk_warn_percent": 85, "unavailable_warn_delta": 1, "log_lines": 500, **extra}
+
+
+def test_checks_find_each_planted_problem(supervisor):
+    api = checks.Api("test-token", base=supervisor)
+    findings, state = checks.run_all(api, options(), {}, NOW)
+    by_check = {}
+    for f in findings:
+        by_check.setdefault(f["check"], []).append(f)
+    assert by_check["core_version"][0]["value"] == "2026.9.2"
+    assert by_check["addon_updates"][0]["value"] == "a0d7b954_bitwarden" and len(by_check["addon_updates"]) == 1
+    assert {f["severity"] for f in by_check["supervisor_issues"]} == {"action", "warn"}
+    assert by_check["backup_age"][0]["severity"] == "action" and by_check["backup_age"][0]["value"] == 10.1
+    assert by_check["disk"][0]["value"] == 88.0
+    assert by_check["unavailable_entities"][0]["value"] == 2 and state["unavailable"] == ["sensor.b", "sensor.c"]
+    assert by_check["core_log_errors"][0]["value"] == {"ERROR": 1, "WARNING": 1}
+    assert "kuma_down" not in by_check  # not configured, not a finding
+
+
+def test_unavailable_delta_uses_the_previous_run(supervisor):
+    api = checks.Api("test-token", base=supervisor)
+    findings, _ = checks.run_all(api, options(), {"unavailable": ["sensor.b"]}, NOW)
+    f = next(x for x in findings if x["check"] == "unavailable_entities")
+    assert f["severity"] == "warn" and "sensor.c" in f["detail"] and f["value"] == 2
+    findings, _ = checks.run_all(api, options(unavailable_warn_delta=5), {"unavailable": ["sensor.b"]}, NOW)
+    f = next(x for x in findings if x["check"] == "unavailable_entities")
+    assert f["severity"] == "info" and f["value"] == 1
+
+
+def test_a_failing_check_is_a_finding_not_a_crash(supervisor):
+    api = checks.Api("wrong-token", base=supervisor)
+    findings, _ = checks.run_all(api, options(), {}, NOW)
+    assert findings and all("failed" in f["title"] for f in findings)
+
+
+def test_override_detection_and_ranking(tmp_path):
+    found = ov.find_overrides(LOGBOOK, 300)
+    assert len(found) == 1
+    o = found[0]
+    assert o["automation"] == "automation.hall_motion" and o["automation_set"] == "on" and o["person_set"] == "off" and o["seconds_later"] == 60.0
+    assert ov.find_overrides(LOGBOOK, 30) == []  # outside the window
+    corpus = ov.Corpus(str(tmp_path))
+    corpus.append(found)
+    corpus.add_fires("2026-09-19", ov.automation_fires(LOGBOOK))
+    ranking = corpus.ranking(days=36500)
+    assert ranking[0]["automation"] == "automation.hall_motion" and ranking[0]["overrides"] == 1 and ranking[0]["fired"] == 1 and ranking[0]["rate"] == 1.0
+
+
+def test_run_once_writes_findings_corpus_and_notifies(supervisor, tmp_path):
+    loops = srv.Loops(options(), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    run = loops.run_once()
+    assert run["counts"]["action"] >= 2 and run["overrides"] == 1
+    assert (tmp_path / "findings" / "2026-09-20.json").exists() and (tmp_path / "latest.json").exists()
+    assert json.loads((tmp_path / "state.json").read_text())["last_run"] == run["ran_at"]
+    assert len(loops.store.history()) == 1
+    assert FakeSupervisor.posted and FakeSupervisor.posted[0][0] == "/core/api/services/notify/mobile_app_test"
+    assert "1 overrides yesterday" in FakeSupervisor.posted[0][1]["message"]
+
+
+def test_server_serves_dark_page_and_json(supervisor, tmp_path):
+    loops = srv.Loops(options(notify_target=""), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    http = srv.serve(loops, 0, host="127.0.0.1")
+    base = f"http://127.0.0.1:{http.server_address[1]}"
+    try:
+        assert urllib.request.urlopen(base + "/healthz").read() == b"ok\n"
+        html = urllib.request.urlopen(base + "/").read().decode()
+        assert "color-scheme:dark" in html and "No run yet" in html
+        req = urllib.request.Request(base + "/api/run", data=b"{}", method="POST")
+        assert json.loads(urllib.request.urlopen(req).read())["overrides"] == 1
+        html = urllib.request.urlopen(base + "/").read().decode()
+        assert "Hall motion" in html and "Newest backup" in html
+        latest = json.loads(urllib.request.urlopen(base + "/api/latest.json").read())
+        assert latest["counts"]["action"] >= 2
+        assert urllib.request.urlopen(base + "/api/overrides.json").read().startswith(b"[")
+    finally:
+        http.shutdown()
+
+
+def test_schedule_math():
+    loops = srv.Loops(options(run_at="03:30"), ".", api=checks.Api("t", base="http://127.0.0.1:9"), now=lambda: NOW)
+    before = dt.datetime(2026, 9, 20, 1, 0)
+    after = dt.datetime(2026, 9, 20, 4, 0)
+    assert loops.seconds_until_next_run(before) == 2.5 * 3600
+    assert loops.seconds_until_next_run(after) == 23.5 * 3600

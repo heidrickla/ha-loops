@@ -1,0 +1,19 @@
+[project]
+name = "ha-loops"
+version = "0.1.0"
+description = "Home Assistant add-on: nightly checks whose findings stay as checks, and the corpus of overridden automations"
+requires-python = ">=3.12"
+license = "MIT"
+
+# Runs under the add-on base image's Alpine python3 (3.12 on Alpine 3.21).
+[tool.ruff]
+target-version = "py312"
+line-length = 200
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "RUF", "SIM"]
+ignore = ["RUF001", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+"loops/page.py" = ["E501"]
