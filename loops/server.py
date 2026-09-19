@@ -209,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     loops = Loops(load_options(args.options), args.data)
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    try:
+        ping = loops.api.get("/supervisor/ping")
+    except Exception as err:  # the first thing to know when every check reads 401
+        ping = f"{type(err).__name__}: {err}"
+    LOG.info("supervisor token present: %s (%d chars); ping: %s", bool(token), len(token), ping)
     server = serve(loops, args.port)
     stop = threading.Event()
     threading.Thread(target=loops.scheduler, args=(stop,), name="scheduler", daemon=True).start()
