@@ -176,6 +176,14 @@ def make_handler(loops: Loops):
                 self._send(200, json.dumps(loops.store.latest()).encode(), "application/json")
             elif path == "/api/overrides.json":
                 self._send(200, json.dumps(loops.corpus.ranking()).encode(), "application/json")
+            elif path == "/api/snapshot.json":
+                try:
+                    doc = checks.snapshot(loops.api)
+                except Exception as err:
+                    # A snapshot that could not be read must not look like an empty one.
+                    self._send(502, json.dumps({"error": type(err).__name__}).encode(), "application/json")
+                    return
+                self._send(200, json.dumps(doc).encode(), "application/json")
             elif path == "/api/history.json":
                 self._send(200, json.dumps(loops.store.history()).encode(), "application/json")
             elif path in ("/", "/index.html"):

@@ -136,6 +136,43 @@ def unavailable_entities(api: Api, previous: set[str] | None, warn_delta: int) -
     return out, current
 
 
+# One recurring error is one signature: the varying parts of a message are replaced.
+SIGNATURE_SUBS = [
+    (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I), "<uuid>"),
+    (re.compile(r"\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b", re.I), "<mac>"),
+    (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b"), "<ip>"),
+    (re.compile(r"'[^']*'|\"[^\"]*\""), "<s>"),
+    (re.compile(r"\b0x[0-9a-f]+\b|\b[0-9a-f]{8,}\b", re.I), "<h>"),
+    (re.compile(r"\d+(?:\.\d+)?"), "<n>"),
+]
+
+
+def signature(level: str, logger: str, message: str) -> str:
+    for pattern, token in SIGNATURE_SUBS:
+        message = pattern.sub(token, message)
+    return f"{level} {logger}: {message[:160]}"
+
+
+def snapshot(api: Api, lines: int = 2000) -> dict:
+    """Unavailable or unknown entities and ERROR/WARNING log signatures, read now.
+
+    The deploy check (ha-management tools/ha_deploy_check.py) takes one before a change and two
+    after it, and reports only what is new in both after-readings (from gstack's canary)."""
+    states = api.core("/states")
+    text = api.get(f"/core/logs?lines={lines}", raw=True)
+    sigs: collections.Counter = collections.Counter()
+    for raw in text.splitlines():
+        m = LOG_LINE.match(re.sub(r"\x1b\[[0-9;]*m", "", raw).rstrip())
+        if m and m.group(1) in ("ERROR", "WARNING"):
+            sigs[signature(m.group(1), m.group(3), m.group(4))] += 1
+    return {
+        "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "entities": len(states),
+        "unavailable": sorted(s["entity_id"] for s in states if s.get("state") in ("unavailable", "unknown")),
+        "log_signatures": dict(sigs),
+    }
+
+
 def core_log_errors(api: Api, lines: int) -> list[dict]:
     text = api.get(f"/core/logs?lines={lines}", raw=True)
     levels: collections.Counter = collections.Counter()

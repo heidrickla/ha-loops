@@ -114,6 +114,23 @@ def test_checks_find_each_planted_problem(supervisor):
     assert "kuma_down" not in by_check  # not configured, not a finding
 
 
+def test_signature_folds_the_varying_parts():
+    a = checks.signature("ERROR", "x.y", "Timeout after 30.5 s talking to 10.20.54.2:8080 for 'kitchen'")
+    b = checks.signature("ERROR", "x.y", "Timeout after 12 s talking to 10.20.54.9:80 for 'hall'")
+    assert a == b == "ERROR x.y: Timeout after <n> s talking to <ip> for <s>"
+    assert checks.signature("ERROR", "x.y", "Other failure") != a
+
+
+def test_snapshot_reads_unavailable_and_log_signatures(supervisor):
+    snap = checks.snapshot(checks.Api("test-token", base=supervisor))
+    assert snap["entities"] == 3
+    assert snap["unavailable"] == ["sensor.b", "sensor.c"]
+    assert snap["log_signatures"] == {
+        "ERROR pychromecast.socket_client: Failed": 1,
+        "WARNING homeassistant.components.zha: slow": 1,
+    }
+
+
 def test_unavailable_delta_uses_the_previous_run(supervisor):
     api = checks.Api("test-token", base=supervisor)
     findings, _ = checks.run_all(api, options(), {"unavailable": ["sensor.b"]}, NOW)
