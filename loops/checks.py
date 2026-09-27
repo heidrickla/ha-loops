@@ -187,6 +187,8 @@ def device_health(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
     """Safety-class devices and locks gone unavailable, batteries under 20 %, and pending updates that
     core_version and addon_updates do not already report."""
     offline, low, updates = {}, {}, {}
+    # A local add-on's update entity has no hassio icon, so add-ons are matched by name as well.
+    addons = {a.get("name") for a in (api.get("/addons") or {}).get("addons", [])}
     for s in api.core("/states"):
         eid, st, attr = s.get("entity_id", ""), s.get("state", ""), s.get("attributes") or {}
         if st == "unavailable" and (attr.get("device_class") in SAFETY_CLASSES or eid.startswith("lock.")):
@@ -198,7 +200,8 @@ def device_health(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
             except ValueError:
                 pass
         picture = str(attr.get("entity_picture") or "")
-        if eid.startswith("update.") and st == "on" and not eid.startswith("update.home_assistant_") and "/api/hassio/addons/" not in picture:
+        supervised = eid.startswith("update.home_assistant_") or "/api/hassio/addons/" in picture or attr.get("title") in addons
+        if eid.startswith("update.") and st == "on" and not supervised:
             updates[eid] = f"{attr.get('title') or attr.get('friendly_name') or eid} -> {attr.get('latest_version', '?')}"
 
     def before(key: str) -> dict | None:
@@ -216,6 +219,7 @@ def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[
     states = api.core("/states")
     live = {s["entity_id"] for s in states}
     refs: set[str] = set()
+    read = 0
     for s in states:
         eid, attr = s["entity_id"], s.get("attributes") or {}
         if eid.startswith("automation.") and attr.get("id"):
@@ -224,7 +228,12 @@ def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[
             text = json.dumps(api.core(f"/config/script/config/{eid.split('.', 1)[1]}"))
         else:
             continue
+        read += 1
         refs |= {f"{d}.{o}" for d, o in REF.findall(text) if d in REF_DOMAINS and not SERVICE_OBJ.match(o)}
+    # Silence must mean "looked and found nothing": no config read, or configs with no entity in any
+    # of them, is a failure to look.
+    if any(s["entity_id"].startswith(("automation.", "script.")) for s in states) and not (read and refs):
+        raise RuntimeError(f"read {read} automation or script configs and found {len(refs)} entity references")
     broken = sorted(refs - live)
     out = _new("broken_refs", "warn", "automation or script references to entities that do not exist", dict.fromkeys(broken, ""), dict.fromkeys(previous, "") if previous is not None else None)
     return out, broken

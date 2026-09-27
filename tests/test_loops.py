@@ -148,13 +148,18 @@ def test_a_failing_check_is_a_finding_not_a_crash(supervisor):
 
 
 class StatesApi:
-    """core() from a dict of paths, for the checks that read only the core API."""
+    """core() from a dict of paths and get("/addons") from a list of names, without HTTP."""
 
-    def __init__(self, docs: dict):
+    def __init__(self, docs: dict, addons: tuple = ("Loops",)):
         self.docs = docs
+        self.addons = addons
 
     def core(self, path: str):
         return self.docs[path]
+
+    def get(self, path: str):
+        assert path == "/addons"
+        return {"addons": [{"name": n} for n in self.addons]}
 
 
 HEALTH_STATES = [
@@ -168,6 +173,7 @@ HEALTH_STATES = [
     {"entity_id": "update.home_assistant_core_update", "state": "on", "attributes": {"latest_version": "2026.10.0"}},
     {"entity_id": "update.vaultwarden_update", "state": "on", "attributes": {"entity_picture": "/api/hassio/addons/a0d7b954_bitwarden/icon"}},
     {"entity_id": "update.zha_fw", "state": "off", "attributes": {}},
+    {"entity_id": "update.loops_update", "state": "on", "attributes": {"title": "Loops", "latest_version": "0.3.0"}},
 ]
 
 
@@ -208,6 +214,16 @@ def test_broken_refs_names_entities_that_do_not_exist():
     assert broken == ["device_tracker.gone_phone", "light.retired_lamp"]
     assert out[0]["severity"] == "warn" and out[0]["value"] == broken
     assert checks.broken_refs(StatesApi(docs), broken)[0] == []
+
+
+def test_broken_refs_that_read_nothing_is_a_failure_not_a_clean_result():
+    no_ids = {"/states": [{"entity_id": "automation.yaml_only", "state": "on", "attributes": {}}]}
+    with pytest.raises(RuntimeError, match="read 0"):
+        checks.broken_refs(StatesApi(no_ids), None)
+    no_refs = {"/states": [{"entity_id": "script.noop", "state": "off", "attributes": {}}], "/config/script/config/noop": {"sequence": [{"delay": 1}]}}
+    with pytest.raises(RuntimeError, match="found 0"):
+        checks.broken_refs(StatesApi(no_refs), None)
+    assert checks.broken_refs(StatesApi({"/states": [{"entity_id": "light.a", "state": "on"}]}), None) == ([], [])
 
 
 def test_override_detection_and_ranking(tmp_path):

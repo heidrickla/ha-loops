@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Pending updates skip any whose title is an installed add-on's name; a local add-on's update entity
+  has no hassio icon and was listed.
+- The reference check fails when it reads no automation or script config, or finds no entity in any,
+  so a silent run means it looked.
+
 ## 0.3.0
 
 - Checks from the retired backups-VM HA health report, each reported when new since the previous run:
