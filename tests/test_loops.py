@@ -147,6 +147,69 @@ def test_a_failing_check_is_a_finding_not_a_crash(supervisor):
     assert findings and all("failed" in f["title"] for f in findings)
 
 
+class StatesApi:
+    """core() from a dict of paths, for the checks that read only the core API."""
+
+    def __init__(self, docs: dict):
+        self.docs = docs
+
+    def core(self, path: str):
+        return self.docs[path]
+
+
+HEALTH_STATES = [
+    {"entity_id": "binary_sensor.kitchen_leak", "state": "unavailable", "attributes": {"device_class": "moisture"}},
+    {"entity_id": "lock.front_door", "state": "unavailable", "attributes": {}},
+    {"entity_id": "media_player.tv", "state": "unavailable", "attributes": {}},
+    {"entity_id": "sensor.garage_door_battery", "state": "0", "attributes": {}},
+    {"entity_id": "sensor.remote_battery", "state": "55", "attributes": {"device_class": "battery"}},
+    {"entity_id": "sensor.flaky_battery", "state": "unknown", "attributes": {"device_class": "battery"}},
+    {"entity_id": "update.room_summary_card_update", "state": "on", "attributes": {"title": "Room Summary Card", "latest_version": "2.4.0"}},
+    {"entity_id": "update.home_assistant_core_update", "state": "on", "attributes": {"latest_version": "2026.10.0"}},
+    {"entity_id": "update.vaultwarden_update", "state": "on", "attributes": {"entity_picture": "/api/hassio/addons/a0d7b954_bitwarden/icon"}},
+    {"entity_id": "update.zha_fw", "state": "off", "attributes": {}},
+]
+
+
+def test_device_health_reports_only_whats_new():
+    api = StatesApi({"/states": HEALTH_STATES})
+    first, state = checks.device_health(api, None)
+    by = {f["check"]: f for f in first}
+    assert by["safety_devices"]["value"] == ["binary_sensor.kitchen_leak", "lock.front_door"] and by["safety_devices"]["severity"] == "action"
+    assert by["battery_low"]["value"] == ["sensor.garage_door_battery"] and "first run" in by["battery_low"]["title"]
+    # core and add-on updates are core_version's and addon_updates' findings, not this one's
+    assert by["pending_updates"]["value"] == ["update.room_summary_card_update"]
+    again, _ = checks.device_health(api, state)
+    assert again == []
+    newer = [dict(s) for s in HEALTH_STATES]
+    newer[6] = {**newer[6], "attributes": {"title": "Room Summary Card", "latest_version": "2.5.0"}}
+    changed, _ = checks.device_health(StatesApi({"/states": newer}), state)
+    assert [f["check"] for f in changed] == ["pending_updates"] and "2.5.0" in changed[0]["detail"]
+
+
+def test_device_health_with_an_empty_previous_state_is_not_a_first_run():
+    out, _ = checks.device_health(StatesApi({"/states": HEALTH_STATES}), {})
+    assert out and not any("first run" in f["title"] for f in out)
+
+
+def test_broken_refs_names_entities_that_do_not_exist():
+    states = [
+        {"entity_id": "automation.arrive", "state": "on", "attributes": {"id": "1665"}},
+        {"entity_id": "automation.yaml_only", "state": "on", "attributes": {}},
+        {"entity_id": "script.goodnight", "state": "off", "attributes": {}},
+        {"entity_id": "lock.front_door", "state": "locked", "attributes": {}},
+    ]
+    docs = {
+        "/states": states,
+        "/config/automation/config/1665": {"triggers": [{"entity_id": "device_tracker.gone_phone"}], "actions": [{"action": "lock.unlock", "target": {"entity_id": "lock.front_door"}}]},
+        "/config/script/config/goodnight": {"sequence": [{"action": "light.turn_off", "target": {"entity_id": "light.retired_lamp"}}]},
+    }
+    out, broken = checks.broken_refs(StatesApi(docs), None)
+    assert broken == ["device_tracker.gone_phone", "light.retired_lamp"]
+    assert out[0]["severity"] == "warn" and out[0]["value"] == broken
+    assert checks.broken_refs(StatesApi(docs), broken)[0] == []
+
+
 def test_override_detection_and_ranking(tmp_path):
     found = ov.find_overrides(LOGBOOK, 300)
     assert len(found) == 1

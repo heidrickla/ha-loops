@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Checks from the retired backups-VM HA health report, each reported when new since the previous run:
+  safety-class devices and locks unavailable (action), batteries under 20% (warn), `update.*` entities
+  other than core, OS, Supervisor and add-ons (info), and entity references in automation and script
+  configs that name no live entity (warn).
+
 ## 0.2.0
 
 - `GET /api/snapshot.json`: unavailable or unknown entities and ERROR/WARNING log signatures, read live. A

@@ -136,6 +136,100 @@ def unavailable_entities(api: Api, previous: set[str] | None, warn_delta: int) -
     return out, current
 
 
+# Ported 2026-09-27 from the backups VM's ha_health_report.py, retired with the platform. Each check
+# reports only what is new since the previous run, so a known-dead sensor does not re-nag.
+BATTERY_LOW = 20
+SAFETY_CLASSES = {"smoke", "gas", "carbon_monoxide", "moisture", "safety", "problem", "door", "window", "connectivity", "battery"}
+REF_DOMAINS = {
+    "alarm_control_panel",
+    "binary_sensor",
+    "sensor",
+    "switch",
+    "light",
+    "lock",
+    "device_tracker",
+    "update",
+    "button",
+    "number",
+    "select",
+    "climate",
+    "cover",
+    "fan",
+    "media_player",
+    "person",
+    "zone",
+    "input_boolean",
+    "input_number",
+    "input_select",
+    "input_text",
+    "automation",
+    "script",
+    "scene",
+}
+REF = re.compile(r"\b([a-z_]+)\.([a-z0-9_]+)\b")
+SERVICE_OBJ = re.compile(
+    r"^(turn_on|turn_off|toggle|reload|set_.*|.*_set|open_cover|close_cover|stop_cover|lock|unlock|arm_.*|alarm_.*|"
+    r"disarm|trigger|press|select_.*|install|increment|decrement|start|stop|create|remove|update|apply|send_.*|.*_command)$"
+)
+
+
+def _new(check: str, severity: str, noun: str, current: dict[str, str], previous: dict[str, str] | None) -> list[dict]:
+    """One finding for the keys whose value is new or changed since the previous run."""
+    new = {k: v for k, v in current.items() if previous is None or previous.get(k) != v}
+    if not new:
+        return []
+    items = [f"{k} ({v})" if v else k for k, v in sorted(new.items())]
+    first = " (first run: everything current)" if previous is None else ""
+    return [finding(check, severity, f"{len(new)} {noun}{first}", ", ".join(items[:20]), sorted(new))]
+
+
+def device_health(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
+    """Safety-class devices and locks gone unavailable, batteries under 20 %, and pending updates that
+    core_version and addon_updates do not already report."""
+    offline, low, updates = {}, {}, {}
+    for s in api.core("/states"):
+        eid, st, attr = s.get("entity_id", ""), s.get("state", ""), s.get("attributes") or {}
+        if st == "unavailable" and (attr.get("device_class") in SAFETY_CLASSES or eid.startswith("lock.")):
+            offline[eid] = ""
+        if attr.get("device_class") == "battery" or eid.endswith("_battery"):
+            try:
+                if float(st) < BATTERY_LOW:
+                    low[eid] = f"{st}%"
+            except ValueError:
+                pass
+        picture = str(attr.get("entity_picture") or "")
+        if eid.startswith("update.") and st == "on" and not eid.startswith("update.home_assistant_") and "/api/hassio/addons/" not in picture:
+            updates[eid] = f"{attr.get('title') or attr.get('friendly_name') or eid} -> {attr.get('latest_version', '?')}"
+
+    def before(key: str) -> dict | None:
+        return None if previous is None else previous.get(key, {})
+
+    out = _new("safety_devices", "action", "safety devices or locks newly unavailable", offline, before("offline"))
+    out += _new("battery_low", "warn", f"batteries newly under {BATTERY_LOW}%", low, before("low_battery"))
+    out += _new("pending_updates", "info", "updates newly available", updates, before("updates"))
+    return out, {"offline": offline, "low_battery": low, "updates": updates}
+
+
+def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[str]]:
+    """Entity-shaped tokens in automation and script configs that name no live entity. Candidates for
+    review, never fixed here: the match is textual, so a few are false positives."""
+    states = api.core("/states")
+    live = {s["entity_id"] for s in states}
+    refs: set[str] = set()
+    for s in states:
+        eid, attr = s["entity_id"], s.get("attributes") or {}
+        if eid.startswith("automation.") and attr.get("id"):
+            text = json.dumps(api.core(f"/config/automation/config/{attr['id']}"))
+        elif eid.startswith("script."):
+            text = json.dumps(api.core(f"/config/script/config/{eid.split('.', 1)[1]}"))
+        else:
+            continue
+        refs |= {f"{d}.{o}" for d, o in REF.findall(text) if d in REF_DOMAINS and not SERVICE_OBJ.match(o)}
+    broken = sorted(refs - live)
+    out = _new("broken_refs", "warn", "automation or script references to entities that do not exist", dict.fromkeys(broken, ""), dict.fromkeys(previous, "") if previous is not None else None)
+    return out, broken
+
+
 # One recurring error is one signature: the varying parts of a message are replaced.
 SIGNATURE_SUBS = [
     (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I), "<uuid>"),
@@ -166,7 +260,7 @@ def snapshot(api: Api, lines: int = 2000) -> dict:
         if m and m.group(1) in ("ERROR", "WARNING"):
             sigs[signature(m.group(1), m.group(3), m.group(4))] += 1
     return {
-        "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "entities": len(states),
         "unavailable": sorted(s["entity_id"] for s in states if s.get("state") in ("unavailable", "unknown")),
         "log_signatures": dict(sigs),
@@ -230,6 +324,13 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
         new_state["unavailable"] = sorted(current)
     except Exception as err:
         findings.append(finding("unavailable_entities", "warn", f"check unavailable_entities failed: {type(err).__name__}: {err}"))
+    for name, fn in (("device_health", device_health), ("broken_refs", broken_refs)):
+        try:
+            out, current = fn(api, state.get(name))
+            findings += out
+            new_state[name] = current
+        except Exception as err:  # state kept as it was, so the next run still compares against a real one
+            findings.append(finding(name, "warn", f"check {name} failed: {type(err).__name__}: {err}"))
     findings += guard("core_log_errors", core_log_errors, api, int(options.get("log_lines") or 500))
     findings += guard("kuma_down", kuma_down, options.get("kuma_url") or "", options.get("kuma_api_key") or "")
     return findings, new_state
