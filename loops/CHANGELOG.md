@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- `kuma_ignore`: Uptime Kuma monitor names left out of the down check, for machines that are off
+  unless a job needs them.
+
 ## 0.3.1
 
 - Pending updates skip any whose title is an installed add-on's name; a local add-on's update entity

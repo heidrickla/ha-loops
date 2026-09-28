@@ -226,6 +226,14 @@ def test_broken_refs_that_read_nothing_is_a_failure_not_a_clean_result():
     assert checks.broken_refs(StatesApi({"/states": [{"entity_id": "light.a", "state": "on"}]}), None) == ([], [])
 
 
+def test_down_monitors_leaves_out_ignored_ones():
+    metrics = (
+        'monitor_status{monitor_name="Lab SSH",monitor_type="port"} 0\nmonitor_status{monitor_name="NetBox",monitor_type="http"} 0\nmonitor_status{monitor_name="Zabbix",monitor_type="http"} 1\n'
+    )
+    assert checks.down_monitors(metrics) == ["Lab SSH", "NetBox"]
+    assert checks.down_monitors(metrics, frozenset({"Lab SSH"})) == ["NetBox"]
+
+
 def test_override_detection_and_ranking(tmp_path):
     found = ov.find_overrides(LOGBOOK, 300)
     assert len(found) == 1

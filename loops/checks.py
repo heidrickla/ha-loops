@@ -295,18 +295,27 @@ def core_log_errors(api: Api, lines: int) -> list[dict]:
     return [finding("core_log_errors", severity, f"Core log: {levels['ERROR']} errors, {levels['WARNING']} warnings in the last {lines} lines", top, dict(levels))]
 
 
-def kuma_down(url: str, key: str) -> list[dict]:
+def down_monitors(metrics: str, ignore: frozenset[str] = frozenset()) -> list[str]:
+    """Monitors whose status is 0, minus `ignore`: monitors of machines that are off unless a job
+    needs them (the development VMs, 2026-09-28), where down is the normal state."""
+    down = []
+    for line in metrics.splitlines():
+        m = METRIC.match(line)
+        if m and m.group(2) == "0":
+            name = dict(LABEL.findall(m.group(1))).get("monitor_name", "?")
+            if name not in ignore:
+                down.append(name)
+    return down
+
+
+def kuma_down(url: str, key: str, ignore: frozenset[str] = frozenset()) -> list[dict]:
     if not url or not key:
         return []
     auth = base64.b64encode(f":{key}".encode()).decode()
     req = urllib.request.Request(f"{url.rstrip('/')}/metrics", headers={"Authorization": f"Basic {auth}"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         text = resp.read().decode("utf-8", "replace")
-    down = []
-    for line in text.splitlines():
-        m = METRIC.match(line)
-        if m and m.group(2) == "0":
-            down.append(dict(LABEL.findall(m.group(1))).get("monitor_name", "?"))
+    down = down_monitors(text, ignore)
     return [finding("kuma_down", "action", f"Uptime Kuma: {len(down)} monitors down", ", ".join(down), down)] if down else []
 
 
@@ -341,5 +350,6 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
         except Exception as err:  # state kept as it was, so the next run still compares against a real one
             findings.append(finding(name, "warn", f"check {name} failed: {type(err).__name__}: {err}"))
     findings += guard("core_log_errors", core_log_errors, api, int(options.get("log_lines") or 500))
-    findings += guard("kuma_down", kuma_down, options.get("kuma_url") or "", options.get("kuma_api_key") or "")
+    ignore = frozenset(n for n in options.get("kuma_ignore") or [] if n)
+    findings += guard("kuma_down", kuma_down, options.get("kuma_url") or "", options.get("kuma_api_key") or "", ignore)
     return findings, new_state

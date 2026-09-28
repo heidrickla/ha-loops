@@ -1,5 +1,5 @@
 name: Loops
-version: "0.3.1"
+version: "0.3.2"
 slug: loops
 description: Nightly health checks with findings that stay as checks, and the corpus of automations the household overrides
 url: https://github.com/heidrickla/ha-loops
@@ -29,6 +29,7 @@ options:
   log_lines: 500
   kuma_url: ""
   kuma_api_key: ""
+  kuma_ignore: []
 schema:
   run_at: match(^([01]\d|2[0-3]):[0-5]\d$)
   notify_target: str?
@@ -39,3 +40,5 @@ schema:
   log_lines: int(100,5000)?
   kuma_url: url?
   kuma_api_key: password?
+  kuma_ignore:
+    - str?

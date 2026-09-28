@@ -26,3 +26,6 @@ configuration:
   kuma_api_key:
     name: Uptime Kuma API key
     description: A key of its own for this add-on.
+  kuma_ignore:
+    name: Ignored monitors
+    description: Monitor names whose down state is normal, such as machines that are off unless needed.
