@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- `harness_regressed` (warn): an Agent Harness Performance Tracker regression sensor that is on, found by the attributes that integration sets, with the gates that fired (version, window, the regressed tasks). Reported when new, and again when another gate fires.
+
 ## 0.3.2
 
 - `kuma_ignore`: Uptime Kuma monitor names left out of the down check, for machines that are off unless a job needs them.

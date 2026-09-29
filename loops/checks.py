@@ -213,6 +213,26 @@ def device_health(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
     return out, {"offline": offline, "low_battery": low, "updates": updates}
 
 
+HARNESS_KEYS = {"version_regressed", "window_regressed"}
+
+
+def harness_regressions(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
+    """Agent Harness Performance Tracker regression sensors that are on, found by the attributes only
+    that integration sets. The value names the gates that fired, not their figures, so a regression
+    that holds is not reported again each night."""
+    regressed = {}
+    for s in api.core("/states"):
+        eid, attr = s.get("entity_id", ""), s.get("attributes") or {}
+        if not eid.startswith("binary_sensor.") or not attr.keys() >= HARNESS_KEYS or s.get("state") != "on":
+            continue
+        why = [gate for gate in ("version", "window") if attr.get(f"{gate}_regressed")]
+        tasks = sorted(str(t) for t in attr.get("regressed_tasks") or [])
+        if tasks:
+            why.append("tasks " + ", ".join(tasks[:5]))
+        regressed[eid] = "; ".join(why) or "on"
+    return _new("harness_regressed", "warn", "agent harnesses newly regressed", regressed, previous), regressed
+
+
 def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[str]]:
     """Entity-shaped tokens in automation and script configs that name no live entity. Candidates for
     review, never fixed here: the match is textual, so a few are false positives."""
@@ -342,7 +362,7 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
         new_state["unavailable"] = sorted(current)
     except Exception as err:
         findings.append(finding("unavailable_entities", "warn", f"check unavailable_entities failed: {type(err).__name__}: {err}"))
-    for name, fn in (("device_health", device_health), ("broken_refs", broken_refs)):
+    for name, fn in (("device_health", device_health), ("broken_refs", broken_refs), ("harness_regressions", harness_regressions)):
         try:
             out, current = fn(api, state.get(name))
             findings += out

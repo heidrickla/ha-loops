@@ -4,7 +4,7 @@ Home Assistant add-on hosting the recurring improvement loops, so they run on th
 
 | Loop | What runs nightly | What persists |
 |---|---|---|
-| Health checks | core and add-on updates, Supervisor issues, backup age, host disk, unavailable-entity delta, core log errors, Uptime Kuma monitors down; newly unavailable safety devices and locks, batteries newly under 20%, other pending updates, automation and script references to missing entities | `/data/findings/<date>.json`, `latest.json`, `history.json`; a summary to the phone |
+| Health checks | core and add-on updates, Supervisor issues, backup age, host disk, unavailable-entity delta, core log errors, Uptime Kuma monitors down; newly unavailable safety devices and locks, batteries newly under 20%, other pending updates, automation and script references to missing entities, Agent Harness Performance Tracker regressions | `/data/findings/<date>.json`, `latest.json`, `history.json`; a summary to the phone |
 | Override corpus | the last day of the logbook, every manual change that undid an automation's change within the window | `/data/overrides.jsonl`, daily automation fire counts, the ranking on the panel and at `/api/overrides.json` |
 
 Rule for the check suite: a finding that is fixed leaves its check behind. The suite only grows.

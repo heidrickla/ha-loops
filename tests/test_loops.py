@@ -193,6 +193,39 @@ def test_device_health_reports_only_whats_new():
     assert [f["check"] for f in changed] == ["pending_updates"] and "2.5.0" in changed[0]["detail"]
 
 
+TRACKER_ATTRS = {"device_class": "problem", "version_regressed": False, "window_regressed": False, "regressed_tasks": []}
+HARNESS_STATES = [
+    {"entity_id": "binary_sensor.codex_harness_regressed", "state": "off", "attributes": TRACKER_ATTRS},
+    {
+        "entity_id": "binary_sensor.claude_code_harness_regressed",
+        "state": "on",
+        "attributes": {**TRACKER_ATTRS, "window_regressed": True, "regressed_tasks": ["hook-build", "ha-repairs"]},
+    },
+    # on, but not the tracker's: no window_regressed attribute
+    {"entity_id": "binary_sensor.other_harness_regressed", "state": "on", "attributes": {"device_class": "problem", "version_regressed": True}},
+]
+
+
+def test_harness_regressions_report_the_trackers_sensors_when_newly_on():
+    first, state = checks.harness_regressions(StatesApi({"/states": HARNESS_STATES}), None)
+    assert [f["value"] for f in first] == [["binary_sensor.claude_code_harness_regressed"]]
+    assert first[0]["severity"] == "warn" and "window; tasks ha-repairs, hook-build" in first[0]["detail"]
+    # The same regression the next night is not news.
+    again, _ = checks.harness_regressions(StatesApi({"/states": HARNESS_STATES}), state)
+    assert again == []
+    # A second gate firing is.
+    worse = [dict(s) for s in HARNESS_STATES]
+    worse[1] = {**worse[1], "attributes": {**worse[1]["attributes"], "version_regressed": True}}
+    changed, _ = checks.harness_regressions(StatesApi({"/states": worse}), state)
+    assert changed and "version; window" in changed[0]["detail"]
+
+
+def test_run_all_carries_the_harness_state_between_runs(supervisor):
+    api = checks.Api("test-token", base=supervisor)
+    _, state = checks.run_all(api, options(), {}, NOW)
+    assert state["harness_regressions"] == {}
+
+
 def test_device_health_with_an_empty_previous_state_is_not_a_first_run():
     out, _ = checks.device_health(StatesApi({"/states": HEALTH_STATES}), {})
     assert out and not any("first run" in f["title"] for f in out)
