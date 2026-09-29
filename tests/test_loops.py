@@ -39,8 +39,22 @@ SUPERVISOR = {
             {"name": "SSH", "slug": "core_ssh", "update_available": False},
         ]
     },
-    "/resolution/info": {"issues": [{"type": "free_space", "context": "system", "reference": None, "uuid": "u1"}], "unhealthy": [], "unsupported": ["os_agent"]},
-    "/backups": {"backups": [{"date": "2026-09-01T00:00:00.000000+00:00"}, {"date": "2026-09-10T02:00:00.000000+00:00"}]},
+    "/resolution/info": {
+        "issues": [
+            {"type": "free_space", "context": "system", "reference": None, "uuid": "u1"},
+            {"type": "no_current_backup", "context": "system", "reference": None, "uuid": "u2"},
+        ],
+        "unhealthy": [],
+        "unsupported": ["os_agent"],
+    },
+    "/backups": {
+        "backups": [
+            {"date": "2026-09-01T00:00:00.000000+00:00", "type": "full", "content": {"homeassistant": True}},
+            {"date": "2026-09-10T02:00:00.000000+00:00", "type": "partial", "content": {"homeassistant": True}},
+            # newer, but one add-on only: no restore point for Home Assistant
+            {"date": "2026-09-19T02:00:00.000000+00:00", "type": "partial", "content": {"homeassistant": False, "addons": ["local_loops"]}},
+        ]
+    },
     "/host/info": {"disk_used": 44.0, "disk_total": 50.0},
     "/core/api/states": [{"entity_id": "light.a", "state": "on"}, {"entity_id": "sensor.b", "state": "unavailable"}, {"entity_id": "sensor.c", "state": "unknown"}],
 }
@@ -106,7 +120,8 @@ def test_checks_find_each_planted_problem(supervisor):
         by_check.setdefault(f["check"], []).append(f)
     assert by_check["core_version"][0]["value"] == "2026.9.2"
     assert by_check["addon_updates"][0]["value"] == "a0d7b954_bitwarden" and len(by_check["addon_updates"]) == 1
-    assert {f["severity"] for f in by_check["supervisor_issues"]} == {"action", "warn"}
+    severity = {f["value"]: f["severity"] for f in by_check["supervisor_issues"]}
+    assert severity == {"u1": "action", "u2": "info", "os_agent": "warn"}
     assert by_check["backup_age"][0]["severity"] == "action" and by_check["backup_age"][0]["value"] == 10.1
     assert by_check["disk"][0]["value"] == 88.0
     assert by_check["unavailable_entities"][0]["value"] == 2 and state["unavailable"] == ["sensor.b", "sensor.c"]

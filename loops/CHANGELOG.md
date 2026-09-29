@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Backup age counts backups that hold Home Assistant (full, or partial with Home Assistant); an add-on's own partial backup made it read fresh.
+- Supervisor's `no_current_backup` is info: it counts full backups only, and Home Assistant's automatic backups are partial, so it stood as an action every night.
+
 ## 0.4.1
 
 - An override is stored once: a run reads the last day, so a run between nightly ones (`POST /api/run`) stored the day's overrides again. Copies already stored count once in the ranking and `/api/overrides.json`.

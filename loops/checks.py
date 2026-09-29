@@ -90,6 +90,11 @@ def supervisor_issues(api: Api) -> list[dict]:
     info = api.get("/resolution/info")
     out = []
     for issue in info.get("issues", []):
+        # Supervisor counts only full backups; Home Assistant's automatic ones are partial, so backup_age
+        # (any backup holding Home Assistant) owns the action.
+        if issue.get("type") == "no_current_backup":
+            out.append(finding("supervisor_issues", "info", "Supervisor issue: no_current_backup (counts full backups only)", "see backup_age", issue.get("uuid")))
+            continue
         out.append(finding("supervisor_issues", "action", f"Supervisor issue: {issue.get('type')} on {issue.get('context')}", str(issue.get("reference") or ""), issue.get("uuid")))
     for item in info.get("unhealthy", []):
         out.append(finding("supervisor_issues", "action", f"Supervisor unhealthy: {item}", "", item))
@@ -99,9 +104,10 @@ def supervisor_issues(api: Api) -> list[dict]:
 
 
 def backup_age(api: Api, max_age_days: int, now: dt.datetime) -> list[dict]:
-    backups = api.get("/backups").get("backups", [])
+    # An add-on's own partial backup is no restore point for Home Assistant.
+    backups = [b for b in api.get("/backups").get("backups", []) if b.get("type") == "full" or (b.get("content") or {}).get("homeassistant")]
     if not backups:
-        return [finding("backup_age", "action", "No backups exist", "ha backups new --filename <name>.tar", None)]
+        return [finding("backup_age", "action", "No backup holds Home Assistant", "ha backups new --filename <name>.tar", None)]
     newest = max(dt.datetime.fromisoformat(b["date"].replace("Z", "+00:00")) for b in backups if b.get("date"))
     age = (now - newest).total_seconds() / 86400
     if age > max_age_days:

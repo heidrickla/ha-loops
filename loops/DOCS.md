@@ -4,9 +4,9 @@ Runs the health checks and the override mining once a day at `run_at`, and once 
 
 | Severity | Meaning |
 |---|---|
-| action | something to do: a Supervisor issue or unhealthy state, no backup or a stale one, Uptime Kuma monitors down, safety devices or locks newly unavailable |
+| action | something to do: a Supervisor issue or unhealthy state, no backup holding Home Assistant or a stale one (full, or partial with Home Assistant; an add-on's own backup does not count), Uptime Kuma monitors down, safety devices or locks newly unavailable |
 | warn | worth a look: disk, a jump in unavailable entities, core log errors, an unsupported Supervisor, batteries newly under 20%, automation or script references to missing entities, an agent harness newly regressed (the Agent Harness Performance Tracker's regression sensor on, with the gates that fired), a check that failed |
-| info | core and add-on updates, other updates newly available, newly unavailable entities, core log warnings, counts |
+| info | core and add-on updates, other updates newly available, newly unavailable entities, core log warnings, counts, Supervisor's `no_current_backup` (it counts full backups only, and Home Assistant's automatic backups are partial) |
 
 Safety devices, batteries, other updates, broken references and harness regressions are reported only when new since the previous run; a regression is reported again when another gate fires. Monitors named in `kuma_ignore` are left out of the down check.
 
