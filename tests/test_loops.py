@@ -280,6 +280,21 @@ def test_override_detection_and_ranking(tmp_path):
     assert ranking[0]["automation"] == "automation.hall_motion" and ranking[0]["overrides"] == 1 and ranking[0]["fired"] == 1 and ranking[0]["rate"] == 1.0
 
 
+def test_an_override_is_stored_and_counted_once(tmp_path):
+    found = ov.find_overrides(LOGBOOK, 300)
+    corpus = ov.Corpus(str(tmp_path))
+    # A manual run between nightly ones reads the same day again.
+    corpus.append(found)
+    corpus.append(found)
+    assert (tmp_path / "overrides.jsonl").read_text(encoding="utf-8").count("\n") == 1
+    # Copies already on disk from before the fix count once.
+    with open(tmp_path / "overrides.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(found[0]) + "\n")
+    assert len(corpus.rows()) == 1
+    corpus.add_fires("2026-09-19", ov.automation_fires(LOGBOOK))
+    assert corpus.ranking(days=36500)[0]["overrides"] == 1
+
+
 def test_run_once_writes_findings_corpus_and_notifies(supervisor, tmp_path):
     loops = srv.Loops(options(), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
     run = loops.run_once()

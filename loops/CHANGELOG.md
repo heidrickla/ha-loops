@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- An override is stored once: a run reads the last day, so a run between nightly ones (`POST /api/run`) stored the day's overrides again. Copies already stored count once in the ranking and `/api/overrides.json`.
+
 ## 0.4.0
 
 - `harness_regressed` (warn): an Agent Harness Performance Tracker regression sensor that is on, found by the attributes that integration sets, with the gates that fired (version, window, the regressed tasks). Reported when new, and again when another gate fires.

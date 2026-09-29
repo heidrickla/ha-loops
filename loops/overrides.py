@@ -67,11 +67,22 @@ class Corpus:
         self.path = os.path.join(data_dir, "overrides.jsonl")
         self.fires_path = os.path.join(data_dir, "automation_fires.json")
 
+    @staticmethod
+    def _key(o: dict) -> tuple[str, str]:
+        return (o.get("when") or "", o.get("entity_id") or "")
+
     def append(self, overrides: list[dict]) -> None:
-        if not overrides:
+        # Each run reads the last day, so a run between nightly ones meets overrides already stored.
+        seen = {self._key(o) for o in self.rows()}
+        new = []
+        for o in overrides:
+            if self._key(o) not in seen:
+                seen.add(self._key(o))
+                new.append(o)
+        if not new:
             return
         with open(self.path, "a", encoding="utf-8") as fh:
-            for o in overrides:
+            for o in new:
                 fh.write(json.dumps(o) + "\n")
 
     def add_fires(self, day: str, fires: collections.Counter) -> None:
@@ -91,8 +102,16 @@ class Corpus:
     def rows(self) -> list[dict]:
         if not os.path.exists(self.path):
             return []
+        out, seen = [], set()
         with open(self.path, encoding="utf-8") as fh:
-            return [json.loads(line) for line in fh if line.strip()]
+            for line in fh:
+                if not line.strip():
+                    continue
+                o = json.loads(line)
+                if self._key(o) not in seen:  # copies written before 0.4.0 count once
+                    seen.add(self._key(o))
+                    out.append(o)
+        return out
 
     def ranking(self, days: int = 30) -> list[dict]:
         cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).isoformat()
