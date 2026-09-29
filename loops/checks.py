@@ -136,8 +136,8 @@ def unavailable_entities(api: Api, previous: set[str] | None, warn_delta: int) -
     return out, current
 
 
-# Ported 2026-09-27 from the backups VM's ha_health_report.py, retired with the platform. Each check
-# reports only what is new since the previous run, so a known-dead sensor does not re-nag.
+# Each check below reports only what is new since the previous run, so a known-dead sensor does not
+# re-nag.
 BATTERY_LOW = 20
 SAFETY_CLASSES = {"smoke", "gas", "carbon_monoxide", "moisture", "safety", "problem", "door", "window", "connectivity", "battery"}
 REF_DOMAINS = {
@@ -297,7 +297,7 @@ def core_log_errors(api: Api, lines: int) -> list[dict]:
 
 def down_monitors(metrics: str, ignore: frozenset[str] = frozenset()) -> list[str]:
     """Monitors whose status is 0, minus `ignore`: monitors of machines that are off unless a job
-    needs them (the development VMs, 2026-09-28), where down is the normal state."""
+    needs them, where down is the normal state."""
     down = []
     for line in metrics.splitlines():
         m = METRIC.match(line)

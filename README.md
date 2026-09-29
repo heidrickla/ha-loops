@@ -34,10 +34,19 @@ suite only grows.
 | `unavailable_warn_delta` | 25 | more unavailable entities than the last run by this many is a warning |
 | `log_lines` | 500 | core log lines scanned |
 | `kuma_url`, `kuma_api_key` | empty | optional; down monitors become findings |
+| `kuma_ignore` | empty | monitor names left out of the down check, for machines that are off unless needed |
 
 ## Endpoints
 
-`/` the page, `/healthz`, `/api/latest.json`, `/api/overrides.json`, `/api/history.json`, `POST /api/run`.
+| Path | Answers |
+|---|---|
+| `/` | the page |
+| `/healthz` | `ok`, for the watchdog |
+| `/api/latest.json` | the latest run's findings |
+| `/api/history.json` | the run history |
+| `/api/overrides.json` | the override ranking |
+| `/api/snapshot.json` | unavailable or unknown entities and ERROR/WARNING log signatures, read live; 502 when a read fails |
+| `POST /api/run` | runs everything now |
 
 ## Develop
 
@@ -45,5 +54,7 @@ suite only grows.
 python -m pytest -q tests
 python -m ruff check . && python -m ruff format --check .
 ```
+
+The forge workflow `.gitea/workflows/validate.yml` runs these plus yamllint and shellcheck.
 
 Deploy to a local add-on directory: `git archive --format=tar HEAD loops | ssh root@<ha> 'tar -x -C /local_apps && ha store reload'`, then install or rebuild `local_loops`.
