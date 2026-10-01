@@ -171,6 +171,30 @@ def test_snapshot_counts_what_core_logged_while_it_stopped(supervisor, monkeypat
     assert snap["log_signatures"][loader] == 2
 
 
+def test_each_stop_counts_its_own_last_seconds(supervisor, monkeypatch):
+    """Which occurrence is counted, not only how many: each signature differs."""
+    log = "\n".join(
+        [
+            "2026-10-01 08:38:18.398 ERROR (MainThread) [first.stop] closing",
+            # The marker in colour, then a second with no run between them.
+            "\x1b[32m[13:38:22] INFO: Home Assistant Core finish process exit code 0\x1b[0m",
+            "[13:38:23] INFO: Home Assistant Core finish process exit code 0",
+            "2026-10-01 08:39:00.000 ERROR (MainThread) [while.running] poll failed",
+            "2026-10-01 09:00:00.000 ERROR (MainThread) [second.stop] closing",
+            "[14:00:01] INFO: Home Assistant Core finish process exit code 0",
+            "2026-10-01 09:00:30.000 ERROR (MainThread) [after.restart] not ready",
+            "",
+        ]
+    )
+    monkeypatch.setattr(sys.modules[__name__], "CORE_LOG", log)
+    snap = checks.snapshot(checks.Api("test-token", base=supervisor))
+    assert snap["stop_signatures"] == {
+        "ERROR first.stop: closing": 1,
+        "ERROR second.stop: closing": 1,
+    }
+    assert len(snap["log_signatures"]) == 4
+
+
 def test_a_log_with_no_exit_marker_has_no_stop_signatures(supervisor):
     snap = checks.snapshot(checks.Api("test-token", base=supervisor))
     assert snap["stop_signatures"] == {}
