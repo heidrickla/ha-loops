@@ -17,6 +17,10 @@ import urllib.request
 
 SUPERVISOR = "http://supervisor"
 LOG_LINE = re.compile(r"^\S+ \S+ (\w+) \(([\w-]+)\) \[([\w.-]+)\] (.*)$")
+# s6 prints this once Core has exited. What Core logged in its last seconds before it is the stop
+# itself: a poll racing the closed HTTP session, say.
+CORE_EXIT = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] INFO: Home Assistant Core finish process")
+STOP_TAIL_S = 15.0
 METRIC = re.compile(r"^monitor_status\{(.*)\} (\S+)$")
 LABEL = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
 
@@ -282,23 +286,51 @@ def signature(level: str, logger: str, message: str) -> str:
     return f"{level} {logger}: {message[:160]}"
 
 
+def _logged_at(line: str) -> dt.datetime | None:
+    try:
+        return dt.datetime.strptime(" ".join(line.split(" ", 2)[:2]), "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        return None
+
+
 def snapshot(api: Api, lines: int = 2000) -> dict:
     """Unavailable or unknown entities and ERROR/WARNING log signatures, read now.
 
     The deploy check (ha-management tools/ha_deploy_check.py) takes one before a change and two
-    after it, and reports only what is new in both after-readings (from gstack's canary)."""
+    after it, and reports only what is new in both after-readings (from gstack's canary).
+    `stop_signatures` counts the occurrences logged within STOP_TAIL_S of Core's last line before
+    an exit, so the check can tell a restart's own noise from what the change broke."""
     states = api.core("/states")
     text = api.get(f"/core/logs?lines={lines}", raw=True)
     sigs: collections.Counter = collections.Counter()
+    during_stop: collections.Counter = collections.Counter()
+    run: list[tuple[dt.datetime, str]] = []
+    last: dt.datetime | None = None
     for raw in text.splitlines():
-        m = LOG_LINE.match(re.sub(r"\x1b\[[0-9;]*m", "", raw).rstrip())
-        if m and m.group(1) in ("ERROR", "WARNING"):
-            sigs[signature(m.group(1), m.group(3), m.group(4))] += 1
+        line = re.sub(r"\x1b\[[0-9;]*m", "", raw).rstrip()
+        if CORE_EXIT.match(line):
+            if last is not None:
+                edge = last - dt.timedelta(seconds=STOP_TAIL_S)
+                during_stop.update(sig for at, sig in run if at >= edge)
+            run, last = [], None
+            continue
+        m = LOG_LINE.match(line)
+        if not m:
+            continue
+        at = _logged_at(line)
+        if at is not None:
+            last = at
+        if m.group(1) in ("ERROR", "WARNING"):
+            sig = signature(m.group(1), m.group(3), m.group(4))
+            sigs[sig] += 1
+            if at is not None:
+                run.append((at, sig))
     return {
         "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "entities": len(states),
         "unavailable": sorted(s["entity_id"] for s in states if s.get("state") in ("unavailable", "unknown")),
         "log_signatures": dict(sigs),
+        "stop_signatures": dict(during_stop),
     }
 
 

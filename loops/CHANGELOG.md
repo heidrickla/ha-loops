@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- `/api/snapshot.json` adds `stop_signatures`: per signature, the occurrences Core logged in the last 15 seconds before it exited (the s6 `Home Assistant Core finish process` line), such as a poll that races the closed HTTP session during a restart.
+
 ## 0.4.2
 
 - Backup age counts backups that hold Home Assistant (full, or partial with Home Assistant); an add-on's own partial backup made it read fresh.

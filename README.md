@@ -43,7 +43,7 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `/api/latest.json` | the latest run's findings |
 | `/api/history.json` | the run history |
 | `/api/overrides.json` | the override ranking |
-| `/api/snapshot.json` | unavailable or unknown entities and ERROR/WARNING log signatures, read live; 502 when a read fails |
+| `/api/snapshot.json` | unavailable or unknown entities and ERROR/WARNING log signatures, read live, with `stop_signatures`: the occurrences logged in the last 15 s before Core exited; 502 when a read fails |
 | `POST /api/run` | runs everything now |
 
 ## Develop

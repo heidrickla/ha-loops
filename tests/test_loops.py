@@ -146,6 +146,36 @@ def test_snapshot_reads_unavailable_and_log_signatures(supervisor):
     }
 
 
+def test_snapshot_counts_what_core_logged_while_it_stopped(supervisor, monkeypatch):
+    log = "\n".join(
+        [
+            # A run: the config-check warning 20 s before the stop, a poll racing the closed session.
+            "2026-10-01 08:37:59.623 WARNING (SyncWorker_6) [homeassistant.loader] custom integration x",
+            "2026-10-01 08:38:18.398 ERROR (MainThread) [homeassistant.components.unifi] Unexpected error fetching UniFi TrafficRules data",
+            "Traceback (most recent call last):",
+            "RuntimeError: Session is closed",
+            "s6-rc: info: service legacy-services: stopping",
+            "[13:38:22] INFO: Home Assistant Core finish process exit code 0",
+            # The next run logs the same error while running: that one is not the stop's.
+            "2026-10-01 08:38:27.179 WARNING (SyncWorker_0) [homeassistant.loader] custom integration x",
+            "2026-10-01 09:00:00.000 ERROR (MainThread) [homeassistant.components.unifi] Unexpected error fetching UniFi TrafficRules data",
+            "",
+        ]
+    )
+    monkeypatch.setattr(sys.modules[__name__], "CORE_LOG", log)
+    snap = checks.snapshot(checks.Api("test-token", base=supervisor))
+    unifi = "ERROR homeassistant.components.unifi: Unexpected error fetching UniFi TrafficRules data"
+    loader = "WARNING homeassistant.loader: custom integration x"
+    assert snap["log_signatures"][unifi] == 2
+    assert snap["stop_signatures"] == {unifi: 1}
+    assert snap["log_signatures"][loader] == 2
+
+
+def test_a_log_with_no_exit_marker_has_no_stop_signatures(supervisor):
+    snap = checks.snapshot(checks.Api("test-token", base=supervisor))
+    assert snap["stop_signatures"] == {}
+
+
 def test_unavailable_delta_uses_the_previous_run(supervisor):
     api = checks.Api("test-token", base=supervisor)
     findings, _ = checks.run_all(api, options(), {"unavailable": ["sensor.b"]}, NOW)

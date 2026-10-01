@@ -12,4 +12,4 @@ Safety devices, batteries, other updates, broken references and harness regressi
 
 An override is a manual change to an entity within `override_window_s` after an automation changed it, to a different state. The ranking counts them per automation over the last 30 days with the number of times the automation fired.
 
-`POST /api/run` on the ingress port runs everything now; an override the corpus already holds is not stored again. `GET /api/snapshot.json` reads the unavailable entities and the ERROR/WARNING log signatures live, and answers 502 when a read fails.
+`POST /api/run` on the ingress port runs everything now; an override the corpus already holds is not stored again. `GET /api/snapshot.json` reads the unavailable entities and the ERROR/WARNING log signatures live, and answers 502 when a read fails. `stop_signatures` counts the occurrences logged in the last 15 seconds before Core exited, the stop's own noise.
