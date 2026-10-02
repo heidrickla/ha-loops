@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- The nightly run reports the agent-memory add-on's candidate review from its `/health` (`memory_url`): info with what it forgot and the candidates left for agents, on its own line in the phone summary; warn when it has not run in 26 h, could not reach its model or failed on a candidate.
+
 ## 0.5.0
 
 - The nightly run reads Automation Monitor's failed-automations and linked-entities sensors and Breakage Radar's affected sensor, and reports what is new: automations failing at run time (warn), entities automations use gone unavailable (warn), custom integrations breaking now or within the radar's window (warn) or later (info).

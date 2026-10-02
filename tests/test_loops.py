@@ -109,7 +109,17 @@ def supervisor():
 
 
 def options(**extra) -> dict:
-    return {"run_at": "03:30", "notify_target": "mobile_app_test", "override_window_s": 300, "backup_max_age_days": 7, "disk_warn_percent": 85, "unavailable_warn_delta": 1, "log_lines": 500, **extra}
+    return {
+        "run_at": "03:30",
+        "notify_target": "mobile_app_test",
+        "override_window_s": 300,
+        "backup_max_age_days": 7,
+        "disk_warn_percent": 85,
+        "unavailable_warn_delta": 1,
+        "log_lines": 500,
+        "memory_url": "",
+        **extra,
+    }
 
 
 def test_checks_find_each_planted_problem(supervisor):
@@ -468,3 +478,65 @@ def test_run_all_reports_the_monitors_check_failing_when_its_sensors_are_absent(
     findings, state = checks.run_all(api, options(), {}, NOW)
     assert any(f["check"] == "monitors" and "no sensor found" in f["title"] for f in findings)
     assert "monitors" not in state
+
+
+class FakeMemory(BaseHTTPRequestHandler):
+    health: ClassVar[dict] = {}
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        out = json.dumps(FakeMemory.health).encode()
+        self.send_response(200 if self.path == "/health" else 404)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+@pytest.fixture
+def memory():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeMemory)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+RAN = {"at": "2026-09-20T03:00:40+00:00", "version": "review-v1", "reviewed": 30, "forgotten": {"duplicate": 9, "session-state": 3}, "kept": 18, "failed": 0, "error": None, "review_at": "03:00"}
+
+
+def test_memory_review_reports_the_nights_run(memory):
+    FakeMemory.health = {"candidates": 18, "candidate_review": RAN}
+    [f] = checks.memory_review(memory, NOW)
+    assert f["severity"] == "info" and f["title"] == "Memory review: 12 forgotten (9 duplicate, 3 session state), 18 candidates left for agents"
+
+
+def test_memory_review_warns_when_it_did_not_run_cleanly(memory):
+    cases = [
+        ({"at": None, "review_at": "03:00"}, "Memory review has not run"),
+        ({**RAN, "error": "model server unavailable"}, "Memory review: model server unavailable"),
+        ({**RAN, "at": "2026-09-18T03:00:40+00:00"}, "Memory review last ran 48 h ago"),
+        ({**RAN, "failed": 2}, "Memory review: 2 candidates failed"),
+    ]
+    for block, title in cases:
+        FakeMemory.health = {"candidates": 18, "candidate_review": block}
+        [f] = checks.memory_review(memory, NOW)
+        assert f["severity"] == "warn" and f["title"] == title, block
+
+
+def test_memory_review_is_off_when_empty_and_a_finding_when_unreachable(supervisor):
+    assert checks.memory_url({}) == checks.MEMORY_URL and checks.memory_url({"memory_url": ""}) == ""
+    assert checks.memory_review("", NOW) == []
+    api = checks.Api("test-token", base=supervisor)
+    findings, _ = checks.run_all(api, options(memory_url="http://127.0.0.1:9"), {}, NOW)
+    [f] = [f for f in findings if f["check"] == "memory_review"]
+    assert f["severity"] == "warn" and f["title"].startswith("check memory_review failed")
+
+
+def test_the_memory_review_line_survives_a_busy_night(supervisor, memory, tmp_path):
+    FakeMemory.health = {"candidates": 18, "candidate_review": RAN}
+    loops = srv.Loops(options(memory_url=memory), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    run = loops.run_once()
+    assert run["counts"]["action"] + run["counts"]["warn"] >= 4, "control: the memory line is past the top four"
+    assert "- Memory review: 12 forgotten (9 duplicate, 3 session state), 18 candidates left for agents" in FakeSupervisor.posted[-1][1]["message"]

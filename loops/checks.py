@@ -430,6 +430,39 @@ def kuma_down(url: str, key: str, ignore: frozenset[str] = frozenset()) -> list[
     return [finding("kuma_down", "action", f"Uptime Kuma: {len(down)} monitors down", ", ".join(down), down)] if down else []
 
 
+# The agent-memory add-on, through the host: its port is published there.
+MEMORY_URL = "http://10.20.52.10:8765"
+MEMORY_REVIEW_MAX_AGE_H = 26.0
+
+
+def memory_url(options: dict) -> str:
+    """Absent means the default: the Supervisor applies option defaults only at install. Empty turns it off."""
+    return str(options.get("memory_url", MEMORY_URL) or "")
+
+
+def memory_review(url: str, now: dt.datetime) -> list[dict]:
+    """The agent-memory add-on's nightly candidate review, read from its `/health`. Info when it ran
+    within a day; warn when it has not, could not reach its model, or failed on a candidate."""
+    if not url:
+        return []
+    with urllib.request.urlopen(f"{url.rstrip('/')}/health", timeout=30) as resp:
+        health = json.load(resp)
+    block = health.get("candidate_review") or {}
+    if not block.get("at"):
+        return [finding("memory_review", "warn", "Memory review has not run", f"review_at {block.get('review_at')}", block)]
+    gone = block.get("forgotten") or {}
+    forgot = f"{sum(gone.values())} forgotten ({gone.get('duplicate', 0)} duplicate, {gone.get('session-state', 0)} session state)"
+    summary = f"Memory review: {forgot}, {health.get('candidates')} candidates left for agents"
+    age_h = (now - dt.datetime.fromisoformat(block["at"])).total_seconds() / 3600
+    if block.get("error"):
+        return [finding("memory_review", "warn", f"Memory review: {block['error']}", summary, block)]
+    if age_h > MEMORY_REVIEW_MAX_AGE_H:
+        return [finding("memory_review", "warn", f"Memory review last ran {age_h:.0f} h ago", summary, block)]
+    if block.get("failed"):
+        return [finding("memory_review", "warn", f"Memory review: {block['failed']} candidates failed", summary, block)]
+    return [finding("memory_review", "info", summary, "", block)]
+
+
 def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[list[dict], dict]:
     """Every check, each failure of a check becoming its own finding rather than stopping the run."""
     findings: list[dict] = []
@@ -463,4 +496,5 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
     findings += guard("core_log_errors", core_log_errors, api, int(options.get("log_lines") or 500))
     ignore = frozenset(n for n in options.get("kuma_ignore") or [] if n)
     findings += guard("kuma_down", kuma_down, options.get("kuma_url") or "", options.get("kuma_api_key") or "", ignore)
+    findings += guard("memory_review", memory_review, memory_url(options), now)
     return findings, new_state

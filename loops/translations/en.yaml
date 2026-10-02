@@ -29,3 +29,6 @@ configuration:
   kuma_ignore:
     name: Ignored monitors
     description: Monitor names whose down state is normal, such as machines that are off unless needed.
+  memory_url:
+    name: Agent memory URL
+    description: The agent-memory add-on, whose nightly candidate review the run reports. Absent means http://10.20.52.10:8765; empty turns the check off.
