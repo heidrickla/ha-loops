@@ -400,3 +400,71 @@ def test_schedule_math():
     after = dt.datetime(2026, 9, 20, 4, 0)
     assert loops.seconds_until_next_run(before) == 2.5 * 3600
     assert loops.seconds_until_next_run(after) == 23.5 * 3600
+
+
+FAILED_ROW = {
+    "entity_id": "automation.hall_motion",
+    "name": "Hall motion",
+    "unique_id": "1665",
+    "last_error_time": "2026-09-19T22:00:00+00:00",
+    "error_message": "Template variable error: 'None' has no attribute 'state'",
+    "error_step": "action/1",
+    "consecutive_failures": 1,
+}
+LINKED_ROW = {
+    "entity_id": "light.office_desk",
+    "name": "Office desk",
+    "state": "unavailable",
+    "device_id": None,
+    "unavailable_since": "2026-09-19T20:00:00+00:00",
+    "referenced_by": ["automation.office_on", "script.desk"],
+}
+RADAR_ATTRS = {
+    "findings": [
+        {"domain": "battery_notes", "breaks_in": "2027.8", "file": "custom_components/battery_notes/coordinator.py", "line": 740},
+        {"domain": "envisalink_new", "breaks_in": "2027.8", "file": "custom_components/envisalink_new/sensor.py", "line": 30},
+        {"domain": "envisalink_new", "breaks_in": "2026.11", "file": "custom_components/envisalink_new/__init__.py", "line": 12},
+    ],
+    "schedule": [],
+    "broken_now": {},
+    "imminent": {"envisalink_new": "2026.11"},
+    "index_url": "https://booyaka101.github.io/hass-breakage-radar/index.json",
+}
+MONITOR_STATES = [
+    {"entity_id": "sensor.failed_automations", "state": "1", "attributes": {"automations": [FAILED_ROW]}},
+    {"entity_id": "sensor.linked_entities_unavailable", "state": "1", "attributes": {"entities": [LINKED_ROW]}},
+    {"entity_id": "sensor.breakage_radar_affected", "state": "2", "attributes": RADAR_ATTRS},
+    # an `automations` attribute of another shape is some other sensor's
+    {"entity_id": "sensor.other", "state": "3", "attributes": {"automations": [{"entity_id": "automation.x"}]}},
+]
+
+
+def test_monitors_report_each_kind_once_and_a_change_again():
+    out, state = checks.monitors(StatesApi({"/states": MONITOR_STATES}), {})
+    by = {f["check"]: f for f in out}
+    assert by["automation_failures"]["value"] == ["automation.hall_motion"] and "action/1" in by["automation_failures"]["detail"]
+    assert by["linked_unavailable"]["value"] == ["light.office_desk"] and "used by 2" in by["linked_unavailable"]["detail"]
+    assert by["breakage_imminent"]["severity"] == "warn" and by["breakage_imminent"]["value"] == ["envisalink_new"]
+    assert "2026.11" in by["breakage_imminent"]["detail"]
+    assert by["breakage_upcoming"]["severity"] == "info" and by["breakage_upcoming"]["value"] == ["battery_notes"]
+    assert set(by) == {"automation_failures", "linked_unavailable", "breakage_imminent", "breakage_upcoming"}
+    again, _ = checks.monitors(StatesApi({"/states": MONITOR_STATES}), state)
+    assert again == []
+    moved = [dict(s) for s in MONITOR_STATES]
+    moved[0] = {**moved[0], "attributes": {"automations": [{**FAILED_ROW, "error_step": "action/3"}]}}
+    changed, _ = checks.monitors(StatesApi({"/states": moved}), state)
+    assert [f["check"] for f in changed] == ["automation_failures"] and "action/3" in changed[0]["detail"]
+
+
+def test_monitors_with_a_sensor_missing_is_a_failure_to_look():
+    for i in range(3):
+        states = [s for j, s in enumerate(MONITOR_STATES) if j != i]
+        with pytest.raises(RuntimeError, match="no sensor found"):
+            checks.monitors(StatesApi({"/states": states}), {})
+
+
+def test_run_all_reports_the_monitors_check_failing_when_its_sensors_are_absent(supervisor):
+    api = checks.Api("test-token", base=supervisor)
+    findings, state = checks.run_all(api, options(), {}, NOW)
+    assert any(f["check"] == "monitors" and "no sensor found" in f["title"] for f in findings)
+    assert "monitors" not in state

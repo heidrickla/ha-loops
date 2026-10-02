@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+
+- The nightly run reads Automation Monitor's failed-automations and linked-entities sensors and Breakage Radar's affected sensor, and reports what is new: automations failing at run time (warn), entities automations use gone unavailable (warn), custom integrations breaking now or within the radar's window (warn) or later (info).
+
 ## 0.4.3
 
 - `/api/snapshot.json` adds `stop_signatures`: per signature, the occurrences Core logged in the last 15 seconds before it exited (the s6 `Home Assistant Core finish process` line), such as a poll that races the closed HTTP session during a restart.

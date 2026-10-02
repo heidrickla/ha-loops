@@ -243,6 +243,59 @@ def harness_regressions(api: Api, previous: dict | None) -> tuple[list[dict], di
     return _new("harness_regressed", "warn", "agent harnesses newly regressed", regressed, previous), regressed
 
 
+# The item keys and attributes that only Automation Monitor's two sensors and Breakage Radar's
+# affected sensor carry; entity ids can be renamed, these cannot.
+FAILED_ITEM = {"entity_id", "error_message", "error_step", "consecutive_failures"}
+LINKED_ITEM = {"entity_id", "unavailable_since", "referenced_by"}
+RADAR_KEYS = {"findings", "schedule", "broken_now", "imminent", "index_url"}
+
+
+def _items(attr: dict, key: str, keys: set[str]) -> list[dict] | None:
+    value = attr.get(key)
+    if not isinstance(value, list) or not all(isinstance(i, dict) and i.keys() >= keys for i in value):
+        return None
+    return value
+
+
+def monitors(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
+    """What Automation Monitor and Breakage Radar hold, reported when new: automations failing at
+    run time, entities automations use that went unavailable, and custom integrations using an API
+    Home Assistant removes (warn when broken now or within the radar's alert window)."""
+    failed: dict[str, str] | None = None
+    linked: dict[str, str] | None = None
+    radar: dict | None = None
+    for s in api.core("/states"):
+        eid, attr = s.get("entity_id", ""), s.get("attributes") or {}
+        if not eid.startswith("sensor."):
+            continue
+        if (rows := _items(attr, "automations", FAILED_ITEM)) is not None:
+            failed = {r["entity_id"]: str(r.get("error_step") or "") for r in rows}
+        elif (rows := _items(attr, "entities", LINKED_ITEM)) is not None:
+            linked = {r["entity_id"]: f"used by {len(r.get('referenced_by') or [])}" for r in rows}
+        elif attr.keys() >= RADAR_KEYS:
+            radar = attr
+    if failed is None or linked is None or radar is None:
+        missing = [n for n, v in (("failed automations", failed), ("linked entities", linked), ("breakage radar", radar)) if v is None]
+        raise RuntimeError("no sensor found for " + ", ".join(missing))
+    soon = set(radar.get("broken_now") or {}) | set(radar.get("imminent") or {})
+    later: dict[str, str] = {}
+    near: dict[str, str] = {}
+    for f in radar.get("findings") or []:
+        domain, release = str(f.get("domain") or ""), str(f.get("breaks_in") or "")
+        bucket = near if domain in soon else later
+        if domain and (domain not in bucket or release < bucket[domain]):
+            bucket[domain] = release
+
+    def before(key: str) -> dict | None:
+        return None if previous is None else previous.get(key, {})
+
+    out = _new("automation_failures", "warn", "automations newly failing at run time", failed, before("failed"))
+    out += _new("linked_unavailable", "warn", "entities that automations use newly unavailable", linked, before("linked"))
+    out += _new("breakage_imminent", "warn", "custom integrations newly breaking now or within the radar's window", near, before("near"))
+    out += _new("breakage_upcoming", "info", "custom integrations newly found using an API Home Assistant removes", later, before("later"))
+    return out, {"failed": failed, "linked": linked, "near": near, "later": later}
+
+
 def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[str]]:
     """Entity-shaped tokens in automation and script configs that name no live entity. Candidates for
     review, never fixed here: the match is textual, so a few are false positives."""
@@ -400,7 +453,7 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
         new_state["unavailable"] = sorted(current)
     except Exception as err:
         findings.append(finding("unavailable_entities", "warn", f"check unavailable_entities failed: {type(err).__name__}: {err}"))
-    for name, fn in (("device_health", device_health), ("broken_refs", broken_refs), ("harness_regressions", harness_regressions)):
+    for name, fn in (("device_health", device_health), ("broken_refs", broken_refs), ("harness_regressions", harness_regressions), ("monitors", monitors)):
         try:
             out, current = fn(api, state.get(name))
             findings += out
