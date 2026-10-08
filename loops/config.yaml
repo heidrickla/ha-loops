@@ -1,5 +1,5 @@
 name: Loops
-version: "0.7.1"
+version: "0.7.2"
 slug: loops
 description: Nightly health checks with findings that stay as checks, and the corpus of automations the household overrides
 url: https://github.com/heidrickla/ha-loops

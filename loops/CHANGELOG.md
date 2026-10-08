@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- `/api/actions.json` counts today's stream and action rows, so a connected collector that records nothing shows.
+
 ## 0.7.1
 
 - `energy_meter`: the panel's total energy statistic. An hour it did not move counts as missing for every circuit, since statistics keep writing zero-change rows while the meter is offline; a week of a dead meter read as a week of zero HVAC energy. Days measured without it are measured again.

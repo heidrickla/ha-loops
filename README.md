@@ -55,7 +55,7 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `/api/overrides.json` | the override ranking |
 | `/api/snapshot.json` | unavailable or unknown entities and ERROR/WARNING log signatures, read live, with `stop_signatures`: the occurrences logged in the last 15 s before Core exited; 502 when a read fails |
 | `/api/controller.json` | the last 60 HVAC days with their inputs' counts, and every week |
-| `/api/actions.json` | the collector's connection, its gaps and the latest score |
+| `/api/actions.json` | the collector's connection, today's stream and action rows, its gaps and the latest score |
 | `POST /api/run` | runs everything now |
 
 ## Develop

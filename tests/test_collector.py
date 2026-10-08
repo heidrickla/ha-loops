@@ -44,6 +44,8 @@ def test_record_files_the_stream_and_user_actions_only(tmp_path):
     assert [r["entity_id"] for r in stream] == ["light.a", "light.a", "climate.c", "light.b"]
     assert stream[2]["hvac_action"] == "cooling" and stream[2]["current_temperature"] == 75
     assert [(a["entity_id"], a["action"], a["supported"]) for a in actions] == [("light.a", {"state": "on", "brightness": 10}, True), ("light.b", {}, False)]
+    assert c.today("2026-10-08") == {"date": "2026-10-08", "stream": 4, "actions": 2}
+    assert c.today("2026-10-09") == {"date": "2026-10-09", "stream": 0, "actions": 0}
 
 
 def test_a_gap_or_a_stop_of_the_add_on_makes_a_day_incomplete(tmp_path):

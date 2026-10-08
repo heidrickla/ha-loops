@@ -256,7 +256,8 @@ def make_handler(loops: Loops):
             elif path == "/api/actions.json":
                 c = loops.collector
                 score = next((f["value"] for f in (loops.store.latest() or {}).get("findings", []) if f["check"] == "manual_actions"), None)
-                doc = {"connected_since": c.connected_since, "gaps": c.gaps()[-50:], "score": score}
+                today = loops.now().astimezone(loops.tz()).date().isoformat()
+                doc = {"connected_since": c.connected_since, "today": c.today(today), "gaps": c.gaps()[-50:], "score": score}
                 self._send(200, json.dumps(doc).encode(), "application/json")
             elif path == "/api/history.json":
                 self._send(200, json.dumps(loops.store.history()).encode(), "application/json")

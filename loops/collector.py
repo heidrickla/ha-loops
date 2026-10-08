@@ -209,6 +209,17 @@ class Collector:
             out.append(day)
         return out
 
+    def today(self, day: str) -> dict:
+        """Rows filed so far today: a connected collector with no stream rows is not recording."""
+        out = {"date": day}
+        for sub in ("stream", "actions"):
+            path = os.path.join(self.dir, sub, f"{day}.jsonl")
+            out[sub] = 0
+            if os.path.exists(path):
+                with self.lock, open(path, encoding="utf-8") as fh:
+                    out[sub] = sum(1 for _ in fh)
+        return out
+
     def actions(self, day: str) -> list[dict]:
         path = os.path.join(self.dir, "actions", f"{day}.jsonl")
         if not os.path.exists(path):
