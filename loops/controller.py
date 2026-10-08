@@ -70,11 +70,18 @@ def fetch(ws, energy_ids: list[str], temp_id: str, start: dt.datetime, end: dt.d
     return out
 
 
-def day_row(day: dt.date, tz: ZoneInfo, zones: dict[str, list[str]], temp_id: str, hours: dict[str, dict[int, float]], arm: str) -> dict:
+def day_row(day: dt.date, tz: ZoneInfo, zones: dict[str, list[str]], temp_id: str, hours: dict[str, dict[int, float]], arm: str, meter_id: str = "") -> dict:
+    """With `meter_id`, the panel's total energy: an hour it did not move is an hour the meter was not
+    reporting (a house never uses 0 Wh in an hour), and every circuit's reading for it is missing.
+    Statistics keep writing rows of zero change while the meter is offline."""
     expected = expected_hours(day, tz)
     temps = hours.get(temp_id, {})
     t_missing = [h for h in expected if h not in temps]
+    meter = hours.get(meter_id, {}) if meter_id else None
+    dead = {h for h in expected if meter is not None and meter.get(h, 0.0) <= 0.0}
     row: dict = {"date": day.isoformat(), "arm": arm, "expected_hours": len(expected), "temperature": {"statistic_id": temp_id, "present": len(expected) - len(t_missing), "missing": len(t_missing)}}
+    if meter_id:
+        row["meter"] = {"statistic_id": meter_id, "not_reporting": len(dead)}
     if t_missing:
         row.update(cdd65=None, hdd65=None, eligible=None, reason=f"outdoor temperature missing {len(t_missing)} of {len(expected)} hours")
     else:
@@ -87,7 +94,7 @@ def day_row(day: dt.date, tz: ZoneInfo, zones: dict[str, list[str]], temp_id: st
         circuits = {}
         for sid in ids:
             got = hours.get(sid, {})
-            missing = [h for h in expected if h not in got]
+            missing = [h for h in expected if h not in got or h in dead]
             circuits[sid] = {"present": len(expected) - len(missing), "missing": len(missing), "kwh": None if missing else round(sum(got[h] for h in expected), 4)}
         complete = all(c["kwh"] is not None for c in circuits.values())
         row["zones"][name] = {"circuits": circuits, "complete": complete, "kwh": round(sum(c["kwh"] for c in circuits.values()), 4) if complete else None}
@@ -153,6 +160,7 @@ class Controller:
         Returns a summary for the nightly finding."""
         zones = parse_zones(options.get("hvac_zones") or [])
         temp_id = (options.get("outdoor_temperature") or "").strip()
+        meter_id = (options.get("energy_meter") or "").strip()
         if not zones or not temp_id:
             raise ConfigError("hvac_zones and outdoor_temperature are not set")
         arm = (options.get("controller_arm") or "baseline").strip()
@@ -160,20 +168,21 @@ class Controller:
         known = {r["date"]: r for r in self.days()}
 
         def done(r: dict | None) -> bool:
-            return bool(r) and r["temperature"]["missing"] == 0 and all(z["complete"] for z in r["zones"].values()) and set(r["zones"]) == set(zones)
+            same = bool(r) and set(r["zones"]) == set(zones) and (r.get("meter") or {}).get("statistic_id", "") == meter_id
+            return same and r["temperature"]["missing"] == 0 and all(z["complete"] for z in r["zones"].values())
 
         todo = [first + dt.timedelta(days=i) for i in range((today - first).days) if not done(known.get((first + dt.timedelta(days=i)).isoformat()))]
         if todo:
             start = dt.datetime.combine(todo[0], dt.time(0), tz)
             end = dt.datetime.combine(todo[-1] + dt.timedelta(days=1), dt.time(0), tz)
-            ids = sorted({s for v in zones.values() for s in v})
+            ids = sorted({s for v in zones.values() for s in v} | ({meter_id} if meter_id else set()))
             hours = fetch(ws, ids, temp_id, start, end)
             for day in todo:
                 expected = set(expected_hours(day, tz))
                 kept = {sid: {str(h): v for h, v in got.items() if h in expected} for sid, got in hours.items()}
                 self._write(os.path.join("inputs", f"{day.isoformat()}.json"), kept)
                 # a recomputed day keeps the arm it was first recorded under
-                known[day.isoformat()] = day_row(day, tz, zones, temp_id, hours, known.get(day.isoformat(), {}).get("arm", arm))
+                known[day.isoformat()] = day_row(day, tz, zones, temp_id, hours, known.get(day.isoformat(), {}).get("arm", arm), meter_id)
         rows = [known[k] for k in sorted(known)]
         weeks = week_rows(rows, list(zones))
         self._write("days.json", rows)

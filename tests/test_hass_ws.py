@@ -68,7 +68,9 @@ def serve(script):
         conn.close()
         srv.close()
 
-    threading.Thread(target=run, daemon=True).start()
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    seen["thread"] = thread
     return port, seen
 
 
@@ -89,6 +91,7 @@ def test_a_call_answered_in_fragments_around_a_ping_returns_its_result():
     port, seen = serve(script)
     with hass_ws.CoreSocket("tok", host="127.0.0.1", port=port, timeout=10) as ws:
         got = ws.call("recorder/statistics_during_period", period="hour")
+    seen["thread"].join(10)
     assert got == {"big": big}
     assert seen["auth"] == {"type": "auth", "access_token": "tok"}
     assert seen["call"]["type"] == "recorder/statistics_during_period" and seen["call"]["period"] == "hour"

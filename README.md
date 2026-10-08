@@ -42,6 +42,7 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `outdoor_temperature` | empty | statistic id of an outdoor temperature with hourly means |
 | `controller_arm` | `baseline` | label of the thermostat settings in force, recorded per day |
 | `controller_from` | empty | first local day measured, `YYYY-MM-DD`; empty is the last 30 days |
+| `energy_meter` | empty | statistic id of the panel's total energy; an hour it did not move counts every circuit's hour as missing |
 
 ## Endpoints
 

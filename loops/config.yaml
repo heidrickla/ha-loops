@@ -1,5 +1,5 @@
 name: Loops
-version: "0.7.0"
+version: "0.7.1"
 slug: loops
 description: Nightly health checks with findings that stay as checks, and the corpus of automations the household overrides
 url: https://github.com/heidrickla/ha-loops
@@ -35,6 +35,7 @@ options:
   outdoor_temperature: ""
   controller_arm: baseline
   controller_from: ""
+  energy_meter: ""
 schema:
   run_at: match(^([01]\d|2[0-3]):[0-5]\d$)
   notify_target: str?
@@ -53,3 +54,4 @@ schema:
   outdoor_temperature: str?
   controller_arm: match(^[A-Za-z0-9_.-]{1,40}$)?
   controller_from: match(^(\d{4}-\d{2}-\d{2})?$)?
+  energy_meter: str?

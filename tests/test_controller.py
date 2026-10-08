@@ -110,3 +110,18 @@ def test_configuration_and_timestamps():
         ctl.Controller.update(ctl.Controller.__new__(ctl.Controller), None, {}, TZ, dt.date(2026, 7, 1))
     assert ctl.hour_start(1782910800000.0) == 1782910800
     assert ctl.hour_start("2026-07-01T05:00:00+00:00") == int(dt.datetime(2026, 7, 1, 5, tzinfo=dt.UTC).timestamp())
+
+
+def test_hours_the_house_meter_did_not_move_are_missing_for_every_circuit():
+    day = dt.date(2026, 8, 3)
+    hours = hours_for(day)
+    expected = ctl.expected_hours(day, TZ)
+    hours["sensor.meter"] = {h: (0.0 if i < 3 else 2.0) for i, h in enumerate(expected)}
+    row = ctl.day_row(day, TZ, ZONES, TEMP, hours, "baseline", "sensor.meter")
+    assert row["meter"] == {"statistic_id": "sensor.meter", "not_reporting": 3}
+    assert row["zones"]["central"]["kwh"] is None and row["zones"]["central"]["circuits"]["sensor.ac_c"]["missing"] == 3
+    hours["sensor.meter"] = {h: 0.0 for h in expected}
+    dead = ctl.day_row(day, TZ, ZONES, TEMP, hours, "baseline", "sensor.meter")
+    assert not any(z["complete"] for z in dead["zones"].values()), "a week of a dead meter is not a week of zero energy"
+    hours["sensor.meter"] = {h: 1.0 for h in expected}
+    assert ctl.day_row(day, TZ, ZONES, TEMP, hours, "baseline", "sensor.meter")["zones"]["central"]["complete"]

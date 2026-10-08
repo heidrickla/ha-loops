@@ -44,3 +44,6 @@ configuration:
   controller_from:
     name: Measure from
     description: First local day of the HVAC measurement, YYYY-MM-DD. Empty means the last 30 days.
+  energy_meter:
+    name: Energy meter
+    description: The statistic id of the panel's total energy. An hour it did not move is an hour the meter was not reporting, and every circuit's reading for that hour counts as missing.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- `energy_meter`: the panel's total energy statistic. An hour it did not move counts as missing for every circuit, since statistics keep writing zero-change rows while the meter is offline; a week of a dead meter read as a week of zero HVAC energy. Days measured without it are measured again.
+
 ## 0.7.0
 
 - Loop 7, HVAC energy per cooling degree-day: `hvac_zones` and `outdoor_temperature` name long-term statistics; the nightly run fetches each local day's hourly energy change and mean temperature over Core's websocket, from `controller_from`, and keeps the inputs under `/data/controller`. A week's kWh per CDD65 per zone and for the house is a ratio of sums over at least five complete cooling days; a missing hour makes its zone-day unavailable. `controller_arm` labels each new day. Nothing changes a thermostat.
