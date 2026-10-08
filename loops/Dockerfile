@@ -9,13 +9,14 @@ SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 ARG BUILD_ARCH=amd64
 
 # The server is the Python standard library; nothing is pip-installed.
-RUN apk add --no-cache python3 ca-certificates \
- && python3 -c "import http.server, ssl, urllib.request; print('python ok')"
+# tzdata: local days are Home Assistant's time zone (zoneinfo reads /usr/share/zoneinfo)
+RUN apk add --no-cache python3 ca-certificates tzdata \
+ && python3 -c "import http.server, ssl, urllib.request, zoneinfo; zoneinfo.ZoneInfo('America/Chicago'); print('python ok')"
 
 WORKDIR /opt/loops
-COPY server.py checks.py overrides.py page.py ./
+COPY server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py ./
 
-RUN python3 -m py_compile server.py checks.py overrides.py page.py
+RUN python3 -m py_compile server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py
 
 COPY run.sh /run.sh
 RUN chmod +x /run.sh

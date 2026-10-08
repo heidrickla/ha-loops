@@ -57,6 +57,7 @@ SUPERVISOR = {
     },
     "/host/info": {"disk_used": 44.0, "disk_total": 50.0},
     "/core/api/states": [{"entity_id": "light.a", "state": "on"}, {"entity_id": "sensor.b", "state": "unavailable"}, {"entity_id": "sensor.c", "state": "unknown"}],
+    "/core/api/config": {"time_zone": "America/Chicago"},
 }
 CORE_LOG = "2026-09-19 03:12:01.123 ERROR (Thread-7) [pychromecast.socket_client] Failed\n2026-09-19 03:12:02.000 WARNING (MainThread) [homeassistant.components.zha] slow\n2026-09-19 03:12:03.000 INFO (MainThread) [homeassistant.setup] fine\n"
 
@@ -540,3 +541,39 @@ def test_the_memory_review_line_survives_a_busy_night(supervisor, memory, tmp_pa
     run = loops.run_once()
     assert run["counts"]["action"] + run["counts"]["warn"] >= 4, "control: the memory line is past the top four"
     assert "- Memory review: 12 forgotten (9 duplicate, 3 session state), 18 candidates left for agents" in FakeSupervisor.posted[-1][1]["message"]
+
+
+class StatsSocket:
+    """Core's websocket for the HVAC statistics: cooling days at 85 F, 0.5 kWh an hour per circuit. NOW is 19 Sep
+    local, so the 17th and 18th are the complete days."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def call(self, kind, **kw):
+        import controller as ctl
+        from zoneinfo import ZoneInfo
+
+        assert kind == "recorder/statistics_during_period"
+        tz = ZoneInfo("America/Chicago")
+        hours = [h for d in range(17, 20) for h in ctl.expected_hours(dt.date(2026, 9, d), tz)]
+        key = kw["types"][0]
+        return {sid: [{"start": h * 1000, key: 85.0 if key == "mean" else 0.5} for h in hours] for sid in kw["statistic_ids"]}
+
+
+def test_the_nightly_run_measures_hvac_and_scores_the_action_record(supervisor, tmp_path):
+    hvac = {"hvac_zones": ["central=sensor.ac,sensor.fu"], "outdoor_temperature": "sensor.out", "controller_from": "2026-09-17"}
+    loops = srv.Loops(options(**hvac), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    loops.socket = StatsSocket
+    run = loops.run_once()
+    hvac_rows = [f for f in run["findings"] if f["check"] == "hvac_per_degree_day"]
+    assert hvac_rows and hvac_rows[0]["severity"] == "info" and "2 counting days, 5 needed" in hvac_rows[0]["title"]
+    assert len(loops.controller.days()) == 2 and loops.controller.days()[0]["cdd65"] == 20.0
+    actions = [f for f in run["findings"] if f["check"] == "manual_actions"]
+    assert actions and actions[0]["title"].startswith("manual actions: 0 complete days of 60") and actions[0]["title"].endswith("(provisional)")
+    unset = srv.Loops(options(), str(tmp_path / "x"), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    unset.socket = StatsSocket
+    assert unset.loop7(NOW)[0]["title"].startswith("loop 7 not measuring")

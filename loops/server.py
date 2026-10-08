@@ -4,10 +4,13 @@
 
 Once a day at `run_at` (local time) the check suite runs against the Supervisor and
 core APIs with the add-on's own token, the last day of the logbook is mined for
-overrides, findings and the corpus are written under /data, and a summary goes
-to the notify target. The ingress page shows the latest findings, the override
-ranking and the run history; /api/latest.json and /api/overrides.json serve the
-same to other tools. Standard library only.
+overrides, the HVAC energy per degree-day is brought up to date (loop 7) and the
+manual-action record is scored (loop 4), findings and the corpus are written under
+/data, and a summary goes to the notify target. A websocket subscription records
+manual actions as they happen. The ingress page shows the latest findings, the
+override ranking, the HVAC weeks, the action record and the run history;
+/api/latest.json, /api/overrides.json, /api/controller.json and /api/actions.json
+serve the same to other tools. Standard library only.
 """
 
 from __future__ import annotations
@@ -26,8 +29,12 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import checks
+import collector as col
+import controller as ctl
+import hass_ws
 import overrides as ov
 import page
+from zoneinfo import ZoneInfo
 
 LOG = logging.getLogger("loops")
 
@@ -85,6 +92,62 @@ class Loops:
         self.api = api or checks.Api(os.environ.get("SUPERVISOR_TOKEN", ""))
         self.now = now or (lambda: dt.datetime.now(dt.UTC))
         self.lock = threading.Lock()
+        self.controller = ctl.Controller(data_dir)
+        self.data_dir = data_dir
+        self._tz: ZoneInfo | None = None
+        self._collector: col.Collector | None = None
+        self.socket = lambda: hass_ws.CoreSocket(os.environ.get("SUPERVISOR_TOKEN", ""))
+
+    def tz(self) -> ZoneInfo:
+        """Home Assistant's own time zone, read once; local days are its days."""
+        if self._tz is None:
+            self._tz = ZoneInfo(self.api.core("/config")["time_zone"])
+        return self._tz
+
+    @property
+    def collector(self) -> col.Collector:
+        if self._collector is None:
+            self._collector = col.Collector(self.data_dir, self.tz())
+        return self._collector
+
+    def loop7(self, now: dt.datetime) -> list[dict]:
+        try:
+            today = now.astimezone(self.tz()).date()
+            with self.socket() as ws:
+                s = self.controller.update(ws, self.options, self.tz(), today)
+        except ctl.ConfigError as err:
+            return [checks.finding("hvac_per_degree_day", "info", f"loop 7 not measuring: {err}")]
+        except Exception as err:
+            return [checks.finding("hvac_per_degree_day", "warn", f"HVAC statistics read failed: {type(err).__name__}: {err}")]
+        out = []
+        day = s["latest_day"]
+        if day and (day["temperature"]["missing"] or not all(z["complete"] for z in day["zones"].values())):
+            gaps = [f"temperature {day['temperature']['missing']}h"] if day["temperature"]["missing"] else []
+            gaps += [f"{n} {sum(c['missing'] for c in z['circuits'].values())}h" for n, z in day["zones"].items() if not z["complete"]]
+            out.append(checks.finding("hvac_per_degree_day", "warn", f"HVAC inputs missing on {day['date']}: {', '.join(gaps)}", value=day))
+        # the newest week always, unavailable reasons included, and the newest measured one when older
+        weeks = [s["latest_week"]] if s["latest_week"] else []
+        if s["latest_measured_week"] and (not weeks or s["latest_measured_week"]["week"] != weeks[0]["week"]):
+            weeks.append(s["latest_measured_week"])
+        for week in weeks:
+            parts = [f"{n} {z['kwh_per_cdd']} ({z['days_counted']}d)" if z["kwh_per_cdd"] is not None else f"{n} unavailable ({z['reason']})" for n, z in week["zones"].items()]
+            out.append(checks.finding("hvac_per_degree_day", "info", f"kWh per CDD65, {week['week']} (arm {', '.join(week['arms'])}): {'; '.join(parts)}", value=week))
+        return out
+
+    def loop4(self, now: dt.datetime) -> list[dict]:
+        try:
+            today = now.astimezone(self.tz()).date()
+            self.collector.compress(today.isoformat())
+            s = self.collector.score(today)
+        except Exception as err:
+            return [checks.finding("manual_actions", "warn", f"action record unreadable: {type(err).__name__}: {err}")]
+        title = f"manual actions: {s['complete_days']} complete days of {s['needed_days']}, {s['supported']} actions"
+        if "hour_bucket" in s:
+            hb = s["hour_bucket"]
+            title += f"; hour buckets reproduce {hb['reproduced']} of {hb['of']} held out with {hb['false_positives']} false positives"
+        if s["provisional"]:
+            title += " (provisional)"
+        return [checks.finding("manual_actions", "info", title, value=s)]
 
     def run_once(self) -> dict:
         with self.lock:
@@ -102,6 +165,8 @@ class Loops:
                 self.corpus.add_fires(now.date().isoformat(), fires)
             except Exception as err:
                 findings.append(checks.finding("overrides", "warn", f"logbook read failed: {type(err).__name__}: {err}"))
+            findings += self.loop7(now)
+            findings += self.loop4(now)
             counts = {s: sum(1 for f in findings if f["severity"] == s) for s in ("action", "warn", "info")}
             run = {
                 "ran_at": now.isoformat(timespec="seconds"),
@@ -186,10 +251,17 @@ def make_handler(loops: Loops):
                     self._send(502, json.dumps({"error": type(err).__name__}).encode(), "application/json")
                     return
                 self._send(200, json.dumps(doc).encode(), "application/json")
+            elif path == "/api/controller.json":
+                self._send(200, json.dumps({"days": loops.controller.days()[-60:], "weeks": loops.controller.weeks()}).encode(), "application/json")
+            elif path == "/api/actions.json":
+                c = loops.collector
+                score = next((f["value"] for f in (loops.store.latest() or {}).get("findings", []) if f["check"] == "manual_actions"), None)
+                doc = {"connected_since": c.connected_since, "gaps": c.gaps()[-50:], "score": score}
+                self._send(200, json.dumps(doc).encode(), "application/json")
             elif path == "/api/history.json":
                 self._send(200, json.dumps(loops.store.history()).encode(), "application/json")
             elif path in ("/", "/index.html"):
-                body = page.render(loops.store.latest(), loops.corpus.ranking(), loops.store.history()).encode()
+                body = page.render(loops.store.latest(), loops.corpus.ranking(), loops.store.history(), loops.controller.weeks()).encode()
                 self._send(200, body, "text/html; charset=utf-8")
             else:
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
@@ -228,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
     server = serve(loops, args.port)
     stop = threading.Event()
     threading.Thread(target=loops.scheduler, args=(stop,), name="scheduler", daemon=True).start()
+    try:
+        threading.Thread(target=loops.collector.run, args=(stop, loops.socket), name="collector", daemon=True).start()
+    except Exception:  # without Home Assistant's time zone there is no local day to file by
+        LOG.exception("collector not started")
     LOG.info("serving on :%d, nightly run at %s", args.port, loops.options.get("run_at"))
     try:
         while True:

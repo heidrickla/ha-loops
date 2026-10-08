@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- Loop 7, HVAC energy per cooling degree-day: `hvac_zones` and `outdoor_temperature` name long-term statistics; the nightly run fetches each local day's hourly energy change and mean temperature over Core's websocket, from `controller_from`, and keeps the inputs under `/data/controller`. A week's kWh per CDD65 per zone and for the house is a ratio of sums over at least five complete cooling days; a missing hour makes its zone-day unavailable. `controller_arm` labels each new day. Nothing changes a thermostat.
+- Loop 4, the manual-action record: a websocket subscription keeps every change of an actionable entity and every change a person made, as canonical actions, per local day under `/data`, with the gaps when it was not connected or the add-on not running. The nightly run scores the no-action, most-frequent-action and hour-bucket policies on the later third of complete days, with false positives, provisional until 60 days.
+- `/api/controller.json`, `/api/actions.json`, and an HVAC weeks table on the page.
+
 ## 0.6.0
 
 - The nightly run reports the agent-memory add-on's candidate review from its `/health` (`memory_url`): info with what it forgot and the candidates left for agents, on its own line in the phone summary; warn when it has not run in 26 h, could not reach its model or failed on a candidate.

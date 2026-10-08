@@ -15,7 +15,7 @@ def esc(v) -> str:
     return html.escape(str(v if v is not None else ""))
 
 
-def render(latest: dict | None, ranking: list[dict], history: list[dict]) -> str:
+def render(latest: dict | None, ranking: list[dict], history: list[dict], weeks: list[dict] | None = None) -> str:
     parts = [f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Loops</title><style>{CSS}</style>"]
     parts.append("<h1>Loops</h1><p class=sub>Nightly checks whose findings stay as checks, and the automations the household overrides.</p>")
     if latest:
@@ -42,6 +42,22 @@ def render(latest: dict | None, ranking: list[dict], history: list[dict]) -> str
             parts.append(
                 f"<tr><td>{a['overrides']}</td><td class=muted>{a['fired'] or ''}</td><td>{esc(a['name'] or a['automation'])}<br><code>{esc(a['automation'])}</code></td><td class=muted>{esc(ents)}</td><td class=muted>{esc(a['last'])[:16]}</td></tr>"
             )
+        parts.append("</table>")
+    parts.append("<h2>HVAC energy per cooling degree-day</h2>")
+    if not weeks:
+        parts.append("<p class=muted>Not measured yet: set hvac_zones and outdoor_temperature.</p>")
+    else:
+        names = list(weeks[-1]["zones"])
+        parts.append("<table><tr><th>Week</th><th>Arm</th>" + "".join(f"<th>{esc(n)} kWh/CDD65</th>" for n in names) + "</tr>")
+        for w in reversed(weeks[-26:]):
+            cells = []
+            for n in names:
+                z = w["zones"].get(n) or {}
+                if z.get("kwh_per_cdd") is None:
+                    cells.append(f"<td class=muted>{esc(z.get('reason', 'no data'))}</td>")
+                else:
+                    cells.append(f"<td>{z['kwh_per_cdd']} <span class=muted>({z['kwh']} kWh / {z['cdd65']}, {z['days_counted']}d)</span></td>")
+            parts.append(f"<tr><td>{esc(w['week'])}</td><td class=muted>{esc(', '.join(w['arms']))}</td>{''.join(cells)}</tr>")
         parts.append("</table>")
     parts.append("<h2>Runs</h2>")
     if history:
