@@ -32,6 +32,9 @@ configuration:
   memory_url:
     name: Agent memory URL
     description: The agent-memory add-on, whose nightly candidate review the run reports. Absent means http://10.20.52.10:8765; empty turns the check off.
+  collector_url:
+    name: Options collector URL
+    description: The options collector add-on, whose weekday run the check reads from /runs. Absent means http://local-collector:8092; empty turns the check off.
   hvac_zones:
     name: HVAC zones
     description: One entry per zone, name=statistic_id[,statistic_id], the energy statistics of every circuit that runs it (compressor and air handler). Empty turns loop 7 off.

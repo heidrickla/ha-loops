@@ -191,8 +191,8 @@ class Loops:
         top = sorted(run["findings"], key=lambda f: {"action": 0, "warn": 1, "info": 2}.get(f["severity"], 3))
         lines = [f"{c['action']} action, {c['warn']} warn, {c['info']} info; {run['overrides']} overrides yesterday"]
         lines += [f"- {f['title']}" for f in top[:4]]
-        # The memory review has its own line, so a busy night does not push it out of the top four.
-        lines += [f"- {f['title']}" for f in top[4:] if f["check"] == "memory_review"]
+        # The memory review and the options collector have their own lines, so a busy night does not push them out of the top four.
+        lines += [f"- {f['title']}" for f in top[4:] if f["check"] in ("memory_review", "options_collector")]
         code = self.api.post_core(f"/services/notify/{target}", {"title": "Loops: nightly checks", "message": "\n".join(lines)})
         if code >= 300:
             LOG.warning("notify %s answered %s", target, code)

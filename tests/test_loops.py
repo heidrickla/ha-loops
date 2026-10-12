@@ -119,6 +119,7 @@ def options(**extra) -> dict:
         "unavailable_warn_delta": 1,
         "log_lines": 500,
         "memory_url": "",
+        "collector_url": "",
         **extra,
     }
 
@@ -541,6 +542,129 @@ def test_the_memory_review_line_survives_a_busy_night(supervisor, memory, tmp_pa
     run = loops.run_once()
     assert run["counts"]["action"] + run["counts"]["warn"] >= 4, "control: the memory line is past the top four"
     assert "- Memory review: 12 forgotten (9 duplicate, 3 session state), 18 candidates left for agents" in FakeSupervisor.posted[-1][1]["message"]
+
+
+class FakeCollector(BaseHTTPRequestHandler):
+    runs: ClassVar[list] = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        out = json.dumps(FakeCollector.runs).encode()
+        self.send_response(200 if self.path == "/runs" else 404)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+@pytest.fixture
+def collector():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeCollector)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def crun(started, kind="scheduled", **kw):
+    return {
+        "id": started,
+        "kind": kind,
+        "started_at": started,
+        "finished_at": started,
+        "symbols": 521,
+        "written": 521,
+        "deduped": 0,
+        "failed": 0,
+        "not_attempted": 0,
+        "aborted": False,
+        "bytes": 1,
+        "stored_bytes": 1,
+        "failed_symbols": [],
+        "note": None,
+        **kw,
+    }
+
+
+# NOW is Sunday 2026-09-20 03:30 UTC, Saturday evening in New York: the run due is Friday the 18th, 16:20 EDT.
+FRIDAY = "2026-09-18T20:20:00Z"
+
+
+def test_the_due_run_is_the_latest_weekday_whose_window_closed():
+    due = checks.collector_due
+    utc = dt.UTC
+    assert due(NOW) == dt.datetime(2026, 9, 18, 20, 20, tzinfo=utc)
+    assert due(dt.datetime(2026, 9, 22, 3, 30, tzinfo=utc)) == dt.datetime(2026, 9, 21, 20, 20, tzinfo=utc), "Tuesday 03:30 UTC is Monday evening"
+    assert due(dt.datetime(2026, 9, 21, 20, 30, tzinfo=utc)) == dt.datetime(2026, 9, 18, 20, 20, tzinfo=utc), "a run still inside its window is not yet due"
+    assert due(dt.datetime(2026, 9, 21, 23, 20, tzinfo=utc)) == dt.datetime(2026, 9, 21, 20, 20, tzinfo=utc)
+    assert due(dt.datetime(2026, 12, 8, 3, 30, tzinfo=utc)) == dt.datetime(2026, 12, 7, 21, 20, tzinfo=utc), "EST runs at 21:20 UTC"
+
+
+def test_a_good_run_is_info_and_a_holiday_run_of_only_duplicates_is_too(collector):
+    FakeCollector.runs = [crun("2026-09-17T20:20:03Z"), crun("2026-09-18T20:20:02Z")]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "info" and f["title"] == "Options collector: 2026-09-18 run ok"
+    FakeCollector.runs = [crun("2026-09-17T20:20:03Z"), crun(FRIDAY, written=0, deduped=521)]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "info" and "521 deduped" in f["detail"]
+
+
+def test_a_missed_day_warns_and_a_manual_run_does_not_count(collector):
+    FakeCollector.runs = [crun("2026-09-17T20:20:03Z"), crun("2026-09-18T20:40:00Z", kind="manual")]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "warn" and f["title"] == "Options collector: no run for 2026-09-18"
+    FakeCollector.runs = [crun("2026-09-17T20:20:03Z"), crun("2026-09-19T14:00:00Z", kind="catch-up")]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "warn" and "catch-up run, started 2026-09-19T14:00:00Z" in f["detail"]
+    FakeCollector.runs = [crun("2026-09-17T20:20:03Z"), crun("2026-09-18T23:30:00Z")]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "warn", "a run started after the window closed is late"
+
+
+def test_an_aborted_run_and_more_than_five_percent_failed_warn(collector):
+    FakeCollector.runs = [crun("2026-09-17T20:20:03Z"), crun(FRIDAY, aborted=True, written=100, failed=3, not_attempted=418, note="stopped on three consecutive 403")]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "warn" and f["title"] == "Options collector: run for 2026-09-18 aborted"
+    FakeCollector.runs = [crun(FRIDAY, written=494, failed=27, failed_symbols=["ABC"])]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "warn" and f["title"] == "Options collector: 27 of 521 symbols failed for 2026-09-18"
+    FakeCollector.runs = [crun(FRIDAY, written=495, failed=26)]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "info", "26 of 521 is under 5%"
+
+
+def test_the_failure_share_is_of_the_symbols_attempted(collector):
+    FakeCollector.runs = [crun(FRIDAY, symbols=521, written=20, failed=2, not_attempted=499)]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "warn", "2 of 22 attempted is over 5%"
+
+
+def test_a_day_before_the_collectors_first_run_is_not_due(collector):
+    FakeCollector.runs = [crun("2026-09-19T13:17:25Z", kind="manual", symbols=1)]
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "info" and f["title"] == "Options collector: nothing due for 2026-09-18 (collecting since 2026-09-19 13:17 UTC)"
+    FakeCollector.runs = []
+    [f] = checks.options_collector(collector, NOW)
+    assert f["severity"] == "info" and "no run yet" in f["title"]
+
+
+def test_an_unreadable_collector_is_could_not_look_and_empty_turns_it_off(supervisor):
+    assert checks.collector_url({}) == checks.COLLECTOR_URL and checks.collector_url({"collector_url": ""}) == ""
+    assert checks.options_collector("", NOW) == []
+    [f] = checks.options_collector("http://127.0.0.1:9", NOW)
+    assert f["severity"] == "warn" and f["title"].startswith("Options collector: could not look")
+    api = checks.Api("test-token", base=supervisor)
+    findings, _ = checks.run_all(api, options(collector_url="http://127.0.0.1:9"), {}, NOW)
+    assert [f["severity"] for f in findings if f["check"] == "options_collector"] == ["warn"]
+
+
+def test_the_collector_line_survives_a_busy_night(supervisor, memory, collector, tmp_path):
+    FakeMemory.health = {"candidates": 18, "candidate_review": RAN}
+    FakeCollector.runs = [crun(FRIDAY, aborted=True, note="stopped")]
+    loops = srv.Loops(options(memory_url=memory, collector_url=collector), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    loops.run_once()
+    assert "- Options collector: run for 2026-09-18 aborted" in FakeSupervisor.posted[-1][1]["message"]
 
 
 class StatsSocket:

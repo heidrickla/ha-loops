@@ -14,6 +14,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from zoneinfo import ZoneInfo
 
 SUPERVISOR = "http://supervisor"
 LOG_LINE = re.compile(r"^\S+ \S+ (\w+) \(([\w-]+)\) \[([\w.-]+)\] (.*)$")
@@ -463,6 +464,71 @@ def memory_review(url: str, now: dt.datetime) -> list[dict]:
     return [finding("memory_review", "info", summary, "", block)]
 
 
+# The options collector add-on, through its add-on network name.
+COLLECTOR_URL = "http://local-collector:8092"
+COLLECTOR_AT = dt.time(16, 20)
+COLLECTOR_WINDOW = dt.timedelta(hours=3)
+COLLECTOR_FAILED_MAX = 0.05
+
+
+def collector_url(options: dict) -> str:
+    """Absent means the default: the Supervisor applies option defaults only at install. Empty turns it off."""
+    return str(options.get("collector_url", COLLECTOR_URL) or "")
+
+
+def collector_due(now: dt.datetime) -> dt.datetime:
+    """The latest weekday 16:20 America/New_York whose 3-hour window has closed by `now`, in UTC."""
+    ny = ZoneInfo("America/New_York")
+    day = now.astimezone(ny).date()
+    while True:
+        at = dt.datetime.combine(day, COLLECTOR_AT, tzinfo=ny)
+        if day.weekday() < 5 and at + COLLECTOR_WINDOW <= now:
+            return at.astimezone(dt.UTC)
+        day -= dt.timedelta(days=1)
+
+
+def _run_start(run: dict) -> dt.datetime:
+    return dt.datetime.fromisoformat(run["started_at"]).astimezone(dt.UTC)
+
+
+def options_collector(url: str, now: dt.datetime) -> list[dict]:
+    """The nightly options collector's weekday run, from its `/runs`. Warn when the most recent due run
+    is missing, aborted or failed on more than 5% of the symbols it tried, or the collector cannot be read.
+    A holiday run that only deduplicated is a good run. A day before the collector's first run is not due."""
+    if not url:
+        return []
+    due = collector_due(now)
+    day = due.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    try:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/runs", timeout=30) as resp:
+            runs = json.load(resp)
+        runs = [r for r in runs if isinstance(r, dict) and r.get("started_at")]
+    except (OSError, ValueError) as err:
+        return [finding("options_collector", "warn", f"Options collector: could not look ({type(err).__name__})", f"{url}/runs for {day}: {err}", None)]
+    starts = [_run_start(r) for r in runs]
+    if not starts or min(starts) > due + COLLECTOR_WINDOW:
+        since = min(starts).strftime("%Y-%m-%d %H:%M UTC") if starts else "no run yet"
+        return [finding("options_collector", "info", f"Options collector: nothing due for {day} (collecting since {since})", "", None)]
+    kept = [r for r, s in zip(runs, starts, strict=True) if r.get("kind") != "manual"]
+    inside = [r for r in kept if due <= _run_start(r) <= due + COLLECTOR_WINDOW]
+    if not inside:
+        later = [r for r in kept if _run_start(r) > due + COLLECTOR_WINDOW]
+        detail = f"no run started between {due:%H:%M} and {(due + COLLECTOR_WINDOW):%H:%M} UTC"
+        if later:
+            detail += f"; the next, a {later[0].get('kind')} run, started {later[0]['started_at']}"
+        return [finding("options_collector", "warn", f"Options collector: no run for {day}", detail, {"due": due.isoformat()})]
+    run = inside[-1]
+    attempted = int(run.get("symbols") or 0) - int(run.get("not_attempted") or 0)
+    failed = int(run.get("failed") or 0)
+    summary = f"{run.get('symbols')} symbols, {run.get('written')} written, {run.get('deduped')} deduped, {failed} failed, {run.get('not_attempted')} not attempted"
+    sample = ", ".join((run.get("failed_symbols") or [])[:10])
+    if run.get("aborted"):
+        return [finding("options_collector", "warn", f"Options collector: run for {day} aborted", f"{summary}; {run.get('note')}; failed {sample}", run)]
+    if attempted <= 0 or failed > COLLECTOR_FAILED_MAX * attempted:
+        return [finding("options_collector", "warn", f"Options collector: {failed} of {attempted} symbols failed for {day}", f"{summary}; failed {sample}", run)]
+    return [finding("options_collector", "info", f"Options collector: {day} run ok", summary, run)]
+
+
 def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[list[dict], dict]:
     """Every check, each failure of a check becoming its own finding rather than stopping the run."""
     findings: list[dict] = []
@@ -497,4 +563,5 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
     ignore = frozenset(n for n in options.get("kuma_ignore") or [] if n)
     findings += guard("kuma_down", kuma_down, options.get("kuma_url") or "", options.get("kuma_api_key") or "", ignore)
     findings += guard("memory_review", memory_review, memory_url(options), now)
+    findings += guard("options_collector", options_collector, collector_url(options), now)
     return findings, new_state

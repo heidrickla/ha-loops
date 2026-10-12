@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+
+- Check `options_collector`: reads the options collector add-on's `/runs` (`collector_url`, absent means `http://local-collector:8092`, empty turns it off). The due run is the latest weekday 16:20 America/New_York whose 3-hour window has closed. Warn when no non-manual run started in the window, the run aborted, more than 5% of the symbols attempted failed, or the collector cannot be read; info when the run is good (a holiday run of only duplicates is good) or the collector's first run is later than the due day. The title carries the day, so each day reports once, and the line stays in the phone summary on a busy night.
+
 ## 0.7.2
 
 - `/api/actions.json` counts today's stream and action rows, so a connected collector that records nothing shows.

@@ -4,7 +4,7 @@ Home Assistant add-on hosting the recurring improvement loops, so they run on th
 
 | Loop | What runs nightly | What persists |
 |---|---|---|
-| Health checks | core and add-on updates, Supervisor issues, backup age, host disk, unavailable-entity delta, core log errors, Uptime Kuma monitors down; newly unavailable safety devices and locks, batteries newly under 20%, other pending updates, automation and script references to missing entities, Agent Harness Performance Tracker regressions; from Automation Monitor and Breakage Radar, automations failing at run time, entities automations use gone unavailable, custom integrations using an API Home Assistant removes | `/data/findings/<date>.json`, `latest.json`, `history.json`; a summary to the phone |
+| Health checks | core and add-on updates, Supervisor issues, backup age, host disk, unavailable-entity delta, core log errors, Uptime Kuma monitors down; newly unavailable safety devices and locks, batteries newly under 20%, other pending updates, automation and script references to missing entities, Agent Harness Performance Tracker regressions; from Automation Monitor and Breakage Radar, automations failing at run time, entities automations use gone unavailable, custom integrations using an API Home Assistant removes; the agent-memory candidate review; the options collector's weekday run (missing, aborted, over 5% failed, unreadable) | `/data/findings/<date>.json`, `latest.json`, `history.json`; a summary to the phone |
 | Override corpus | the last day of the logbook, every manual change that undid an automation's change within the window | `/data/overrides.jsonl`, daily automation fire counts, the ranking on the panel and at `/api/overrides.json` |
 | HVAC per degree-day (loop 7) | each new local day's hourly HVAC circuit energy and outdoor temperature from Core's long-term statistics; kWh per CDD65 per zone and week | `/data/controller` (inputs, days, weeks), `/api/controller.json`, the page's weeks table |
 | Manual actions (loop 4) | live: every change of an actionable entity and every change a person made; nightly: baseline policies scored on held-out days | `/data/stream`, `/data/actions`, `/data/gaps.jsonl`, `/api/actions.json` |
@@ -38,6 +38,7 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `log_lines` | 500 | core log lines scanned |
 | `kuma_url`, `kuma_api_key` | empty | optional; down monitors become findings |
 | `kuma_ignore` | empty | monitor names left out of the down check, for machines that are off unless needed |
+| `collector_url` | `http://local-collector:8092` | the options collector add-on whose weekday run is checked; empty turns the check off |
 | `hvac_zones` | empty | `name=statistic_id[,statistic_id]` per zone: the energy statistics of the circuits that run it |
 | `outdoor_temperature` | empty | statistic id of an outdoor temperature with hourly means |
 | `controller_arm` | `baseline` | label of the thermostat settings in force, recorded per day |
