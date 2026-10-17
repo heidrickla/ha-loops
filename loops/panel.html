@@ -400,6 +400,8 @@ function renderKpis() {
 }
 function renderFindings() {
   const box = $("findings");
+  // a rebuild keeps the rows that were open open
+  const open = new Set([...box.querySelectorAll("details[open]")].map((d) => d.dataset.key));
   clear(box);
   const L = state.latest;
   if (!L) { box.appendChild(html("div", "No run yet.", "empty")); return; }
@@ -419,9 +421,11 @@ function renderFindings() {
     row.appendChild(head);
     if (f.detail) {
       const det = html("details");
+      det.dataset.key = f.check + "|" + f.title;
       det.appendChild(html("summary", f.detail));
       det.appendChild(html("div", f.detail, "full"));
       det.addEventListener("toggle", () => { det.querySelector("summary").textContent = det.open ? "Less" : f.detail; });
+      det.open = open.has(det.dataset.key);
       row.appendChild(det);
     }
     box.appendChild(row);
@@ -730,8 +734,15 @@ $("theme").addEventListener("click", () => {
   applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
   renderAll();
 });
-let resizeTimer = 0;
-new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderAll, 120); }).observe(document.querySelector("main"));
+// redraw on a width change only: a height change (an expanded row) must not rebuild the page
+let resizeTimer = 0, drawnWidth = 0;
+new ResizeObserver((entries) => {
+  const w = Math.round(entries[0].contentRect.width);
+  if (w === drawnWidth) return;
+  drawnWidth = w;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderAll, 120);
+}).observe(document.querySelector("main"));
 load();
 setInterval(load, 60000);
 </script>

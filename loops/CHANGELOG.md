@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- An expanded finding stays open: the page redraws on a width change only, and a refresh keeps open findings open.
+
 ## 0.9.0
 
 - The page is charts drawn in the browser from the `/api` JSON: findings per run by severity, run time, overrides found per run, the override ranking as bars with each automation's fire count, weekly kWh per CDD65 by zone as lines, daily HVAC kWh against CDD65 with the ratio of sums, daily kWh per zone, the manual-action record's progress and a 14-day strip of recorder gaps. Dark with a light toggle; refreshes every minute.
