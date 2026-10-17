@@ -6,7 +6,7 @@ Home Assistant add-on hosting the recurring improvement loops, so they run on th
 |---|---|---|
 | Health checks | core and add-on updates, Supervisor issues, backup age, host disk, unavailable-entity delta, core log errors, Uptime Kuma monitors down; newly unavailable safety devices and locks, batteries newly under 20%, other pending updates, automation and script references to missing entities, Agent Harness Performance Tracker regressions; from Automation Monitor and Breakage Radar, automations failing at run time, entities automations use gone unavailable, custom integrations using an API Home Assistant removes; the agent-memory candidate review; the options collector's weekday run (missing, aborted, over 5% failed, unreadable) | `/data/findings/<date>.json`, `latest.json`, `history.json`; a summary to the phone |
 | Override corpus | the last day of the logbook, every manual change that undid an automation's change within the window | `/data/overrides.jsonl`, daily automation fire counts, the ranking on the panel and at `/api/overrides.json` |
-| HVAC per degree-day (loop 7) | each new local day's hourly HVAC circuit energy and outdoor temperature from Core's long-term statistics; kWh per CDD65 per zone and week | `/data/controller` (inputs, days, weeks), `/api/controller.json`, the page's weeks table |
+| HVAC per degree-day (loop 7) | each new local day's hourly HVAC circuit energy and outdoor temperature from Core's long-term statistics; kWh per CDD65 per zone and week | `/data/controller` (inputs, days, weeks), `/api/controller.json`, the page's weekly and daily charts |
 | Manual actions (loop 4) | live: every change of an actionable entity and every change a person made; nightly: baseline policies scored on held-out days | `/data/stream`, `/data/actions`, `/data/gaps.jsonl`, `/api/actions.json` |
 
 Rule for the check suite: a finding that is fixed leaves its check behind. The suite only grows.
@@ -22,7 +22,8 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `loops/controller.py` | loop 7: HVAC energy per cooling degree-day |
 | `loops/collector.py` | loop 4: the manual-action record and its baseline score |
 | `loops/hass_ws.py` | Core's websocket API, standard library |
-| `loops/page.py` | the dark ingress page |
+| `loops/panel.html` | the ingress page: SVG charts drawn in the browser from the `/api` JSON, dark with a light toggle, no external assets |
+| `loops/page.py` | loads `panel.html` for the server |
 | `tests/` | the suite against a fake Supervisor, the server end to end |
 
 ## Options
@@ -49,7 +50,7 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 
 | Path | Answers |
 |---|---|
-| `/` | the page |
+| `/` | the page, static; it reads the JSON endpoints below by relative path, so it works under ingress |
 | `/healthz` | `ok`, for the watchdog |
 | `/api/latest.json` | the latest run's findings |
 | `/api/history.json` | the run history |

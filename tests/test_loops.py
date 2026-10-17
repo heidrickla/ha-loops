@@ -393,15 +393,22 @@ def test_server_serves_dark_page_and_json(supervisor, tmp_path):
     base = f"http://127.0.0.1:{http.server_address[1]}"
     try:
         assert urllib.request.urlopen(base + "/healthz").read() == b"ok\n"
-        html = urllib.request.urlopen(base + "/").read().decode()
-        assert "color-scheme:dark" in html and "No run yet" in html
+        page = urllib.request.urlopen(base + "/")
+        html = page.read().decode()
+        assert page.headers["Content-Type"] == "text/html; charset=utf-8"
+        assert '<html lang="en" data-theme="dark">' in html and "color-scheme: dark" in html
+        # under ingress the page sits below /api/hassio_ingress/<token>/, so an absolute fetch misses
+        assert '"api/latest.json"' in html and '"/api/' not in html
+        assert json.loads(urllib.request.urlopen(base + "/api/latest.json").read()) is None
         req = urllib.request.Request(base + "/api/run", data=b"{}", method="POST")
         assert json.loads(urllib.request.urlopen(req).read())["overrides"] == 1
-        html = urllib.request.urlopen(base + "/").read().decode()
-        assert "Hall motion" in html and "Newest backup" in html
         latest = json.loads(urllib.request.urlopen(base + "/api/latest.json").read())
         assert latest["counts"]["action"] >= 2
-        assert urllib.request.urlopen(base + "/api/overrides.json").read().startswith(b"[")
+        assert any(f["title"].startswith("Newest backup") for f in latest["findings"])
+        ranking = json.loads(urllib.request.urlopen(base + "/api/overrides.json").read())
+        assert ranking[0]["name"] == "Hall motion"
+        history = json.loads(urllib.request.urlopen(base + "/api/history.json").read())
+        assert len(history) == 1 and history[0]["counts"] == latest["counts"]
     finally:
         http.shutdown()
 

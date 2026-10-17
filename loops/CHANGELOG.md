@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+- The page is charts drawn in the browser from the `/api` JSON: findings per run by severity, run time, overrides found per run, the override ranking as bars with each automation's fire count, weekly kWh per CDD65 by zone as lines, daily HVAC kWh against CDD65 with the ratio of sums, daily kWh per zone, the manual-action record's progress and a 14-day strip of recorder gaps. Dark with a light toggle; refreshes every minute.
+
 ## 0.8.0
 
 - Check `options_collector`: reads the options collector add-on's `/runs` (`collector_url`, absent means `http://local-collector:8092`, empty turns it off). The due run is the latest weekday 16:20 America/New_York whose 3-hour window has closed. Warn when no non-manual run started in the window, the run aborted, more than 5% of the symbols attempted failed, or the collector cannot be read; info when the run is good (a holiday run of only duplicates is good) or the collector's first run is later than the due day. The title carries the day, so each day reports once, and the line stays in the phone summary on a busy night.

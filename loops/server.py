@@ -7,10 +7,11 @@ core APIs with the add-on's own token, the last day of the logbook is mined for
 overrides, the HVAC energy per degree-day is brought up to date (loop 7) and the
 manual-action record is scored (loop 4), findings and the corpus are written under
 /data, and a summary goes to the notify target. A websocket subscription records
-manual actions as they happen. The ingress page shows the latest findings, the
-override ranking, the HVAC weeks, the action record and the run history;
-/api/latest.json, /api/overrides.json, /api/controller.json and /api/actions.json
-serve the same to other tools. Standard library only.
+manual actions as they happen. The ingress page charts the latest findings, the
+run history, the override ranking, the HVAC weeks and days and the action record
+from /api/latest.json, /api/history.json, /api/overrides.json,
+/api/controller.json and /api/actions.json, which serve other tools too.
+Standard library only.
 """
 
 from __future__ import annotations
@@ -262,8 +263,7 @@ def make_handler(loops: Loops):
             elif path == "/api/history.json":
                 self._send(200, json.dumps(loops.store.history()).encode(), "application/json")
             elif path in ("/", "/index.html"):
-                body = page.render(loops.store.latest(), loops.corpus.ranking(), loops.store.history(), loops.controller.weeks()).encode()
-                self._send(200, body, "text/html; charset=utf-8")
+                self._send(200, page.PANEL, "text/html; charset=utf-8")
             else:
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
 

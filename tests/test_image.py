@@ -14,3 +14,8 @@ def test_the_image_copies_and_compiles_every_module():
     copied = next(line for line in lines if line.startswith("COPY ") and "server.py" in line).split()[1:-1]
     compiled = next(line for line in lines if "py_compile" in line).split("py_compile", 1)[1].split()
     assert set(copied) == modules and set(compiled) == modules
+
+
+def test_the_image_copies_the_page():
+    lines = (SRC / "Dockerfile").read_text(encoding="utf-8").splitlines()
+    assert "COPY panel.html ./" in lines

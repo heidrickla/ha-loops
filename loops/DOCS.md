@@ -1,6 +1,6 @@
 # Loops
 
-Runs the health checks and the override mining once a day at `run_at`, and once at start if today's run has not happened. The panel shows the latest findings, the automations the household overrides most, and the run history.
+Runs the health checks and the override mining once a day at `run_at`, and once at start if today's run has not happened. The panel charts the latest run and its findings, findings by severity, run time and overrides found per run, the automations the household overrides most, HVAC kWh per CDD65 by week and zone, each day's HVAC energy against its degree-days, and the manual-action record with its recorder gaps over 14 days; the findings stay listed with their detail, and every run is in a table below.
 
 | Severity | Meaning |
 |---|---|

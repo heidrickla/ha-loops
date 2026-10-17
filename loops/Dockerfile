@@ -16,6 +16,8 @@ RUN apk add --no-cache python3 ca-certificates tzdata \
 WORKDIR /opt/loops
 COPY server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py ./
 
+COPY panel.html ./
+
 RUN python3 -m py_compile server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py
 
 COPY run.sh /run.sh
