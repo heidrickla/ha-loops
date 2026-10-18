@@ -60,11 +60,15 @@ POLICIES = [
         protocol="tcp",
     ),
     pol("p10001", 10001, "Block Guest to Internal", "BLOCK", {"zone_id": "zi", "matching_target": "NETWORK", "network_ids": ["n254"]}, INTERNAL_ANY),
-    pol("p10002", 10002, "Phone-MAC-Any", "ALLOW", {"zone_id": "ze", "matching_target": "MAC", "mac_addresses": ["aa:aa:aa:aa:aa:aa"]}, INTERNAL_ANY),
+    pol("p10002", 10002, "Phone-MAC-Any", "ALLOW", {"zone_id": "ze", "matching_target": "MAC", "macs": ["aa:aa:aa:aa:aa:aa"]}, INTERNAL_ANY),
+    # the same rule for a second zone pair: one name, one index
+    pol("p10002b", 10002, "Phone-MAC-Any", "ALLOW", {"zone_id": "ze", "matching_target": "MAC", "macs": ["aa:aa:aa:aa:aa:aa"]}, {"zone_id": "zg", "matching_target": "ANY"}),
     pol("p10003", 10003, "RDP Everywhere", "ALLOW", RDP, INTERNAL_ANY, protocol="tcp"),
     pol("p10004", 10004, "Allow RDP to Desk", "ALLOW", {"zone_id": "zi", "matching_target": "IP", "ips": ["10.20.54.20"]}, RDP, protocol="tcp", hits=12),
     # a copy: only its id, index and use counters differ
     pol("p10005", 10005, "Allow RDP to Desk", "ALLOW", {"zone_id": "zi", "matching_target": "IP", "ips": ["10.20.54.20"]}, RDP, protocol="tcp", hits=3, last_hit=1760000000),
+    # the same name, made separately, matching something else
+    pol("p10006", 10006, "Allow RDP to Desk", "ALLOW", {"zone_id": "zi", "matching_target": "CLIENT", "client_macs": ["11:22:33:44:55:66"]}, RDP, protocol="tcp"),
     pol("p1", 1, "Allow Return Traffic", "ALLOW", {"zone_id": "ze", "matching_target": "ANY"}, INTERNAL_ANY, predefined=True, connection_state_type="RESPOND_ONLY"),
     pol("p30000", 30000, "Allow All Traffic", "ALLOW", INTERNAL_ANY, INTERNAL_ANY, predefined=True),
 ]
@@ -100,6 +104,8 @@ FIRST = {
     "isolation:IoT",
     "camera_network:aa:bb:cc:00:00:01",
     "external_mac:p10002",
+    "external_mac:p10002b",
+    "same_name:p10006",
     "source_port:p10003",
     "duplicate_policy:p10005",
     "dns_egress",
@@ -254,7 +260,7 @@ def test_a_policy_changed_under_its_id_and_name_is_reported_again(unifi):
 
 
 def test_use_counters_do_not_change_a_policy():
-    a, b = POLICIES[4], POLICIES[5]
+    a, b = (next(p for p in POLICIES if p["_id"] == pid) for pid in ("p10004", "p10005"))
     assert nw.digest(a) == nw.digest(b) and nw.digest({**a, "hits": 99}) == nw.digest(a)
     assert nw.digest({**a, "action": "BLOCK"}) != nw.digest(a)
 
@@ -328,8 +334,18 @@ def test_a_wan_with_no_state_is_an_item_and_keeps_its_history():
 def test_ports_and_broad():
     assert nw.ports({"port": "53,853,1000-1002"}) == {53, 853, 1000, 1001, 1002}
     assert nw.any_port({}) and not nw.any_port({"port": "53"}) and not nw.any_port({"port_matching_type": "OBJECT", "port_group_id": "g1"})
-    assert nw.broad(POLICIES[7]) and not nw.broad(POLICIES[6]) and not nw.broad(POLICIES[0])
-    assert not nw.broad({**POLICIES[7], "schedule": {"mode": "EVERY_DAY"}})
+    allow_all, ret = POLICIES[-1], POLICIES[-2]
+    assert nw.broad(allow_all) and not nw.broad(ret) and not nw.broad(POLICIES[0])
+    assert not nw.broad({**allow_all, "schedule": {"mode": "EVERY_DAY"}})
+    assert not nw.broad({**allow_all, "destination": {**INTERNAL_ANY, "app_ids": ["rdp"]}})
+
+
+def test_a_destination_application_is_a_destination_match():
+    p = pol("p10030", 10030, "RDP by app", "ALLOW", RDP, {**INTERNAL_ANY, "app_ids": ["rdp"]})
+    items, _, _ = nw.policy_items({"zones": ZONES, "policies": [p]})
+    assert "source_port:p10030" not in items
+    items, _, _ = nw.policy_items({"zones": ZONES, "policies": [{**p, "destination": INTERNAL_ANY}]})
+    assert "source_port:p10030" in items
 
 
 def test_dns_egress_needs_both_ports_blocked_for_all_of_the_internal_zone():

@@ -6,7 +6,7 @@ Runs the health checks and the override mining once a day at `run_at`, and once 
 |---|---|
 | action | something to do: a Supervisor issue or unhealthy state, no backup holding Home Assistant or a stale one (full, or partial with Home Assistant; an add-on's own backup does not count), Uptime Kuma monitors down, safety devices or locks newly unavailable, a WAN newly offline |
 | warn | worth a look: disk, a jump in unavailable entities, core log errors, an unsupported Supervisor, batteries newly under 20%, automation or script references to missing entities, an agent harness newly regressed (the Agent Harness Performance Tracker's regression sensor on, with the gates that fired), automations newly failing at run time and entities automations use newly unavailable (from Automation Monitor's sensors), custom integrations newly breaking now or within Breakage Radar's alert window, the agent-memory candidate review not run in 26 h, unable to reach its model or failing on a candidate, the options collector's weekday 16:20 New York run missing, aborted, with over 5% of symbols failed or unreadable, a check that failed; network items newly found (below) and network sources that could not be read |
-| info | core and add-on updates, other updates newly available, newly unavailable entities, core log warnings, counts, Supervisor's `no_current_backup` (it counts full backups only, and Home Assistant's automatic backups are partial), custom integrations newly found by Breakage Radar using an API Home Assistant removes, with the earliest release; duplicate firewall policies, DNS to outside resolvers unblocked |
+| info | core and add-on updates, other updates newly available, newly unavailable entities, core log warnings, counts, Supervisor's `no_current_backup` (it counts full backups only, and Home Assistant's automatic backups are partial), custom integrations newly found by Breakage Radar using an API Home Assistant removes, with the earliest release; duplicate firewall policies or ones sharing a name, DNS to outside resolvers unblocked |
 
 Safety devices, batteries, other updates, broken references, harness regressions and the Automation Monitor and Breakage Radar findings are reported only when new since the previous run; a regression is reported again when another gate fires, and a failing automation when its failing step changes. The monitors check needs the Automation Monitor and Breakage Radar integrations; without their sensors it reports itself failed. Monitors named in `kuma_ignore` are left out of the down check.
 
@@ -29,11 +29,12 @@ Network checks. `unifi_url` (absent means `https://10.20.52.1`, empty turns them
 | `wan_down:<WAN>` | the WAN's status is offline, its link is down, or the gateway holds no state for it |
 | `wan_degraded:<WAN>` | under 99% availability in the controller's uptime statistics |
 | `wan_latency:<WAN>` | latency at least twice and 20 ms above the median of up to 14 previous nights, once five are held |
-| `isolation:<network>` | a network in `isolated_networks` that UniFi does not isolate, whose first broad policy (every protocol, port and connection state, always) to the internal zone allows; user policies come before predefined ones, narrower ALLOW policies before it are its exceptions, and a block counts when it reaches every other network of the zone (any address, those networks, or addresses covering their subnets) |
+| `isolation:<network>` | a network in `isolated_networks` that UniFi does not isolate, whose first broad policy (every protocol, port, application and connection state, always) to the internal zone allows; user policies come before predefined ones, narrower ALLOW policies before it are its exceptions, and a block counts when it reaches every other network of the zone (any address, those networks, or addresses covering their subnets) |
 | `camera_network:<mac>` | a UniFi Protect device, by MAC from Home Assistant's device registry, connected outside `camera_network` |
 | `external_mac:<policy id>` | an ALLOW policy from the External zone matched on a MAC |
-| `source_port:<policy id>` | a policy with a source port and no destination port |
+| `source_port:<policy id>` | a policy with a source port and no destination port, port group, application or web domain |
 | `duplicate_policy:<policy id>` | a policy identical to an earlier one but for its name |
+| `same_name:<policy id>` | a policy made separately (another index) under an earlier policy's name, matching something else |
 | `dns_egress` | port 53 or 853 not blocked or rejected for TCP and UDP from all of the internal zone to any address in the External zone |
 | `port_forward:<id>` | an enabled port forward |
 | `upnp` | UPnP on the gateway |

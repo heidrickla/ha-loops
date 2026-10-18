@@ -40,6 +40,7 @@ RULES = {
     "external_mac": ("warn", "new ALLOW policies from the internet matched on a MAC"),
     "source_port": ("warn", "new policies matching a source port with no destination port"),
     "duplicate_policy": ("info", "new duplicate firewall policies"),
+    "same_name": ("info", "new firewall policies sharing another policy's name"),
     "dns_egress": ("info", "DNS to outside resolvers newly unblocked"),
     "port_forward": ("warn", "new port forwards"),
     "upnp": ("warn", "UPnP newly on"),
@@ -288,6 +289,11 @@ def always(p: dict) -> bool:
     return str(p.get("connection_state_type") or "ALL").upper() == "ALL" and schedule.upper() == "ALWAYS"
 
 
+def any_service(dst: dict) -> bool:
+    """No destination port, port group, application or web domain."""
+    return any_port(dst) and not dst.get("app_ids") and not dst.get("web_domains")
+
+
 def broad(p: dict) -> bool:
     """Every protocol, port and connection state, at all times."""
     src, dst = p.get("source") or {}, p.get("destination") or {}
@@ -295,7 +301,7 @@ def broad(p: dict) -> bool:
         str(p.get("protocol") or "all").lower() == "all"
         and not p.get("match_opposite_protocol")
         and any_port(src)
-        and any_port(dst)
+        and any_service(dst)
         and always(p)
         and not src.get("match_opposite_networks")
         and not dst.get("match_opposite_networks")
@@ -418,17 +424,22 @@ def policy_items(data: dict) -> tuple[dict, set[str], list[str]]:
         src, dst = p.get("source") or {}, p.get("destination") or {}
         pid, name = p.get("_id"), p.get("name") or "-"
         target = str(src.get("matching_target") or "ANY").upper()
-        if str(p.get("action") or "").upper() == "ALLOW" and external and src.get("zone_id") == external and (target == "MAC" or src.get("mac_addresses")):
+        if str(p.get("action") or "").upper() == "ALLOW" and external and src.get("zone_id") == external and (target == "MAC" or src.get("macs") or src.get("mac_addresses")):
             items[f"external_mac:{pid}"] = {"text": f"'{name}' (index {p.get('index')})", "value": digest(p)}
-        if not any_port(src) and any_port(dst):
+        if not any_port(src) and any_service(dst):
             items[f"source_port:{pid}"] = {"text": f"'{name}' (index {p.get('index')}) source port {src.get('port')}", "value": digest(p)}
     seen: dict[str, dict] = {}
+    named: dict[str, dict] = {}
     for p in user:
         sig = digest(p)
         if sig in seen:
             items[f"duplicate_policy:{p.get('_id')}"] = {"text": f"'{p.get('name')}' (index {p.get('index')}) repeats index {seen[sig].get('index')}", "value": sig}
         else:
             seen[sig] = p
+        # One policy made for several zone pairs is several policies under one name and index.
+        first = named.setdefault(str(p.get("name") or ""), p)
+        if p.get("name") and first is not p and first.get("index") != p.get("index") and sig != digest(first):
+            items[f"same_name:{p.get('_id')}"] = {"text": f"'{p.get('name')}' (index {p.get('index')}) shares the name of index {first.get('index')}", "value": sig}
     if not external or not internal:
         return items, {"external_mac", "dns_egress"}, ["no internal or external zone in the zone list"]
     left = open_dns(enabled, internal, external)
@@ -521,7 +532,7 @@ def evaluate(data: dict, errors: dict[str, str], options: dict, history: dict, c
         undecided |= und
         problems += trouble
     if {"networks", "zones", "policies"} & errors.keys():
-        undecided |= {"isolation", "external_mac", "source_port", "duplicate_policy", "dns_egress"}
+        undecided |= {"isolation", "external_mac", "source_port", "duplicate_policy", "same_name", "dns_egress"}
     else:
         names = [n for n in options.get("isolated_networks", list(ISOLATED)) or [] if n]
         for found, und, trouble in (isolation_items(data, names), policy_items(data)):
