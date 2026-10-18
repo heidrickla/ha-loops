@@ -34,7 +34,7 @@ Network checks. `unifi_url` (absent means `https://10.20.52.1`, empty turns them
 | `external_mac:<policy id>` | an ALLOW policy from the External zone matched on a MAC |
 | `source_port:<policy id>` | a policy with a source port and no destination port, port group, application or web domain |
 | `duplicate_policy:<policy id>` | a policy identical to an earlier one but for its name |
-| `same_name:<policy id>` | a policy in the same zone pair as an earlier one of the same name, matching something else |
+| `same_name:<policy id>` | a policy in the same zone pair as an earlier one of the same name, matching something else; a pair matching the same addresses, one as source and one as destination, is the two directions of one block |
 | `dns_egress` | port 53 or 853 not blocked or rejected for TCP and UDP from all of the internal zone to any address in the External zone |
 | `port_forward:<id>` | an enabled port forward |
 | `upnp` | UPnP on the gateway |

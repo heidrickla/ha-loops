@@ -396,6 +396,13 @@ def digest(p: dict) -> str:
     return hashlib.sha256(body.encode()).hexdigest()[:16]
 
 
+def mirrored(a: dict, b: dict) -> bool:
+    """One policy matches addresses as its source and the other the same addresses as its
+    destination: the two directions of one block."""
+    sa, da, sb, db = (x.get(side) or {} for x in (a, b) for side in ("source", "destination"))
+    return bool((sa.get("ips") and sa.get("ips") == db.get("ips")) or (da.get("ips") and da.get("ips") == sb.get("ips")))
+
+
 def differs(a: dict, b: dict) -> list[str]:
     """The fields two policies set differently, one level into each side."""
     out = []
@@ -453,7 +460,7 @@ def policy_items(data: dict) -> tuple[dict, set[str], list[str]]:
         # One rule made for several zone pairs is one policy per pair, each numbered within its pair.
         pair = (p.get("name"), (p.get("source") or {}).get("zone_id"), (p.get("destination") or {}).get("zone_id"))
         first = named.setdefault(pair, p)
-        if p.get("name") and first is not p and sig != digest(first):
+        if p.get("name") and first is not p and sig != digest(first) and not mirrored(first, p):
             diff = ", ".join(differs(first, p))
             items[f"same_name:{p.get('_id')}"] = {
                 "text": f"'{p.get('name')}' (index {p.get('index')}) shares the name of index {first.get('index')} in the same zone pair, differing in {diff}",

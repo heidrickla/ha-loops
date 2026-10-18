@@ -267,6 +267,15 @@ def test_a_same_name_item_names_the_fields_that_differ():
     )
 
 
+def test_the_two_directions_of_one_block_are_not_a_same_name_item():
+    inbound = pol("p10040", 10040, "IPS Deny List 192.0.2.7", "BLOCK", {"zone_id": "ze", "matching_target": "IP", "ips": ["192.0.2.7"]}, INTERNAL_ANY)
+    outbound = pol("p10041", 10041, "IPS Deny List 192.0.2.7", "BLOCK", {"zone_id": "ze", "matching_target": "ANY"}, {**INTERNAL_ANY, "matching_target": "IP", "ips": ["192.0.2.7"]})
+    items, _, _ = nw.policy_items({"zones": ZONES, "policies": [inbound, outbound]})
+    assert "same_name:p10041" not in items
+    items, _, _ = nw.policy_items({"zones": ZONES, "policies": [inbound, {**outbound, "destination": {**outbound["destination"], "ips": ["192.0.2.8"]}}]})
+    assert "same_name:p10041" in items
+
+
 def test_use_counters_do_not_change_a_policy():
     a, b = (next(p for p in POLICIES if p["_id"] == pid) for pid in ("p10004", "p10005"))
     assert nw.digest(a) == nw.digest(b) and nw.digest({**a, "hits": 99}) == nw.digest(a)
