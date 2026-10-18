@@ -61,8 +61,8 @@ POLICIES = [
     ),
     pol("p10001", 10001, "Block Guest to Internal", "BLOCK", {"zone_id": "zi", "matching_target": "NETWORK", "network_ids": ["n254"]}, INTERNAL_ANY),
     pol("p10002", 10002, "Phone-MAC-Any", "ALLOW", {"zone_id": "ze", "matching_target": "MAC", "macs": ["aa:aa:aa:aa:aa:aa"]}, INTERNAL_ANY),
-    # the same rule for a second zone pair: one name, one index
-    pol("p10002b", 10002, "Phone-MAC-Any", "ALLOW", {"zone_id": "ze", "matching_target": "MAC", "macs": ["aa:aa:aa:aa:aa:aa"]}, {"zone_id": "zg", "matching_target": "ANY"}),
+    # the same rule for a second zone pair, numbered within that pair
+    pol("p10002b", 10000, "Phone-MAC-Any", "ALLOW", {"zone_id": "ze", "matching_target": "MAC", "macs": ["aa:aa:aa:aa:aa:aa"]}, {"zone_id": "zg", "matching_target": "ANY"}),
     pol("p10003", 10003, "RDP Everywhere", "ALLOW", RDP, INTERNAL_ANY, protocol="tcp"),
     pol("p10004", 10004, "Allow RDP to Desk", "ALLOW", {"zone_id": "zi", "matching_target": "IP", "ips": ["10.20.54.20"]}, RDP, protocol="tcp", hits=12),
     # a copy: only its id, index and use counters differ

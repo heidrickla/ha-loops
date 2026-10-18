@@ -429,17 +429,18 @@ def policy_items(data: dict) -> tuple[dict, set[str], list[str]]:
         if not any_port(src) and any_service(dst):
             items[f"source_port:{pid}"] = {"text": f"'{name}' (index {p.get('index')}) source port {src.get('port')}", "value": digest(p)}
     seen: dict[str, dict] = {}
-    named: dict[str, dict] = {}
+    named: dict[tuple, dict] = {}
     for p in user:
         sig = digest(p)
         if sig in seen:
             items[f"duplicate_policy:{p.get('_id')}"] = {"text": f"'{p.get('name')}' (index {p.get('index')}) repeats index {seen[sig].get('index')}", "value": sig}
         else:
             seen[sig] = p
-        # One policy made for several zone pairs is several policies under one name and index.
-        first = named.setdefault(str(p.get("name") or ""), p)
-        if p.get("name") and first is not p and first.get("index") != p.get("index") and sig != digest(first):
-            items[f"same_name:{p.get('_id')}"] = {"text": f"'{p.get('name')}' (index {p.get('index')}) shares the name of index {first.get('index')}", "value": sig}
+        # One rule made for several zone pairs is one policy per pair, each numbered within its pair.
+        pair = (p.get("name"), (p.get("source") or {}).get("zone_id"), (p.get("destination") or {}).get("zone_id"))
+        first = named.setdefault(pair, p)
+        if p.get("name") and first is not p and sig != digest(first):
+            items[f"same_name:{p.get('_id')}"] = {"text": f"'{p.get('name')}' (index {p.get('index')}) shares the name of index {first.get('index')} in the same zone pair", "value": sig}
     if not external or not internal:
         return items, {"external_mac", "dns_egress"}, ["no internal or external zone in the zone list"]
     left = open_dns(enabled, internal, external)
