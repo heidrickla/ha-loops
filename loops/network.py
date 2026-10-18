@@ -7,6 +7,7 @@ A source that cannot be read is reported every run. Standard library only.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import hashlib
 import http.cookiejar
@@ -160,6 +161,7 @@ def shape(data: dict, paths: dict[str, str]) -> dict:
         "network_zone_fields": [k for k in union(data.get("networks")) if "zone" in k],
         "client_network_fields": [k for k in union(data.get("clients")) if k in ("network", "network_id", "vlan")],
         "policy": union(data.get("policies")),
+        "policy_origins": dict(collections.Counter(str(p.get("origin_type")) for p in data.get("policies") or [] if isinstance(p, dict))),
         "policy_source": union(data.get("policies"), lambda p: p.get("source")),
         "policy_destination": union(data.get("policies"), lambda p: p.get("destination")),
     }
@@ -394,6 +396,18 @@ def digest(p: dict) -> str:
     return hashlib.sha256(body.encode()).hexdigest()[:16]
 
 
+def differs(a: dict, b: dict) -> list[str]:
+    """The fields two policies set differently, one level into each side."""
+    out = []
+    for k in sorted((a.keys() | b.keys()) - IDENTITY):
+        x, y = a.get(k), b.get(k)
+        if isinstance(x, dict) and isinstance(y, dict):
+            out += [f"{k}.{sub}" for sub in sorted(x.keys() | y.keys()) if x.get(sub) != y.get(sub)]
+        elif x != y:
+            out.append(k)
+    return out
+
+
 def open_dns(policies: list[dict], internal: str, external: str) -> set[int]:
     """The DNS ports no policy blocks from all of the internal zone to any internet address."""
     left = set(DNS_PORTS)
@@ -440,7 +454,11 @@ def policy_items(data: dict) -> tuple[dict, set[str], list[str]]:
         pair = (p.get("name"), (p.get("source") or {}).get("zone_id"), (p.get("destination") or {}).get("zone_id"))
         first = named.setdefault(pair, p)
         if p.get("name") and first is not p and sig != digest(first):
-            items[f"same_name:{p.get('_id')}"] = {"text": f"'{p.get('name')}' (index {p.get('index')}) shares the name of index {first.get('index')} in the same zone pair", "value": sig}
+            diff = ", ".join(differs(first, p))
+            items[f"same_name:{p.get('_id')}"] = {
+                "text": f"'{p.get('name')}' (index {p.get('index')}) shares the name of index {first.get('index')} in the same zone pair, differing in {diff}",
+                "value": sig,
+            }
     if not external or not internal:
         return items, {"external_mac", "dns_egress"}, ["no internal or external zone in the zone list"]
     left = open_dns(enabled, internal, external)

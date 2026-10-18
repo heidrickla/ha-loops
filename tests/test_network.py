@@ -259,6 +259,14 @@ def test_a_policy_changed_under_its_id_and_name_is_reported_again(unifi):
     assert reported(findings) == {"source_port:p10003"}
 
 
+def test_a_same_name_item_names_the_fields_that_differ():
+    items, _, _ = nw.policy_items({"zones": ZONES, "policies": POLICIES})
+    assert (
+        items["same_name:p10006"]["text"]
+        == "'Allow RDP to Desk' (index 10006) shares the name of index 10004 in the same zone pair, differing in source.client_macs, source.ips, source.matching_target"
+    )
+
+
 def test_use_counters_do_not_change_a_policy():
     a, b = (next(p for p in POLICIES if p["_id"] == pid) for pid in ("p10004", "p10005"))
     assert nw.digest(a) == nw.digest(b) and nw.digest({**a, "hits": 99}) == nw.digest(a)
