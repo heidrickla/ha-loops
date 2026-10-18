@@ -26,16 +26,16 @@ Network checks. `unifi_url` (absent means `https://10.20.52.1`, empty turns them
 
 | Key | Item |
 |---|---|
-| `wan_down:<WAN>` | the WAN's status is offline, or its link is down |
+| `wan_down:<WAN>` | the WAN's status is offline, its link is down, or the gateway holds no state for it |
 | `wan_degraded:<WAN>` | under 99% availability in the controller's uptime statistics |
 | `wan_latency:<WAN>` | latency at least twice and 20 ms above the median of up to 14 previous nights, once five are held |
-| `isolation:<network>` | a network in `isolated_networks` that UniFi does not isolate, whose first broad policy (every protocol, port and connection state, always) to the internal zone allows; user policies come before predefined ones, and narrower ALLOW policies before it are its exceptions |
+| `isolation:<network>` | a network in `isolated_networks` that UniFi does not isolate, whose first broad policy (every protocol, port and connection state, always) to the internal zone allows; user policies come before predefined ones, narrower ALLOW policies before it are its exceptions, and a block counts when it reaches every other network of the zone (any address, those networks, or addresses covering their subnets) |
 | `camera_network:<mac>` | a UniFi Protect device, by MAC from Home Assistant's device registry, connected outside `camera_network` |
 | `external_mac:<policy id>` | an ALLOW policy from the External zone matched on a MAC |
 | `source_port:<policy id>` | a policy with a source port and no destination port |
 | `duplicate_policy:<policy id>` | a policy identical to an earlier one but for its name |
-| `dns_egress` | no policy blocks or rejects port 53 or 853 to the External zone |
+| `dns_egress` | port 53 or 853 not blocked or rejected for TCP and UDP from all of the internal zone to any address in the External zone |
 | `port_forward:<id>` | an enabled port forward |
 | `upnp` | UPnP on the gateway |
 
-An item is reported when its key is new or its value changed since the previous run; the first run reports everything current. Each finding names its items' keys as `dismiss: <key>`; keys in `network_dismiss` are not reported. A source that cannot be read is a warn every run, and the items of its rules stay as they were. `/api/network.json` holds the current items, the dismissed keys, the WAN readings, the latency history and the field names read from the controller.
+An item is reported when its key is new or its value changed since the previous run; the first run reports everything current. A policy item's value is a digest of what the policy matches and does, so a policy changed under the same id is reported again. A rule that cannot decide an item in a run (its source unread, a field missing, a device not connected) keeps the item as it was. Each finding names its items' keys as `dismiss: <key>`; keys in `network_dismiss` are not reported. A source that cannot be read is a warn every run, and the items of its rules stay as they were. `/api/network.json` holds the current items, the dismissed keys, the WAN readings, the latency history and the field names read from the controller.
