@@ -50,3 +50,21 @@ configuration:
   energy_meter:
     name: Energy meter
     description: The statistic id of the panel's total energy. An hour it did not move is an hour the meter was not reporting, and every circuit's reading for that hour counts as missing.
+  unifi_url:
+    name: UniFi URL
+    description: The UniFi OS gateway whose controller the network checks read. Absent means https://10.20.52.1; empty turns the network checks off.
+  unifi_username:
+    name: UniFi username
+    description: A read-only local account on the gateway, without two-factor sign-in.
+  unifi_password:
+    name: UniFi password
+    description: That account's password.
+  isolated_networks:
+    name: Isolated networks
+    description: Network names that should not reach the internal zone. A finding when UniFi does not isolate one and the first broad policy from it to the internal zone allows.
+  camera_network:
+    name: Camera network
+    description: The network every UniFi Protect device should be on. Empty turns the check off.
+  network_dismiss:
+    name: Dismissed network findings
+    description: Keys of network findings not to report, as each finding names them, e.g. wan_down:WAN4.

@@ -120,6 +120,7 @@ def options(**extra) -> dict:
         "log_lines": 500,
         "memory_url": "",
         "collector_url": "",
+        "unifi_url": "",
         **extra,
     }
 

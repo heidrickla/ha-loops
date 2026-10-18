@@ -14,11 +14,11 @@ RUN apk add --no-cache python3 ca-certificates tzdata \
  && python3 -c "import http.server, ssl, urllib.request, zoneinfo; zoneinfo.ZoneInfo('America/Chicago'); print('python ok')"
 
 WORKDIR /opt/loops
-COPY server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py ./
+COPY server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py network.py ./
 
 COPY panel.html ./
 
-RUN python3 -m py_compile server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py
+RUN python3 -m py_compile server.py checks.py overrides.py page.py hass_ws.py controller.py collector.py network.py
 
 COPY run.sh /run.sh
 RUN chmod +x /run.sh

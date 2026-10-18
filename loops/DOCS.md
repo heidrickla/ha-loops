@@ -4,9 +4,9 @@ Runs the health checks and the override mining once a day at `run_at`, and once 
 
 | Severity | Meaning |
 |---|---|
-| action | something to do: a Supervisor issue or unhealthy state, no backup holding Home Assistant or a stale one (full, or partial with Home Assistant; an add-on's own backup does not count), Uptime Kuma monitors down, safety devices or locks newly unavailable |
-| warn | worth a look: disk, a jump in unavailable entities, core log errors, an unsupported Supervisor, batteries newly under 20%, automation or script references to missing entities, an agent harness newly regressed (the Agent Harness Performance Tracker's regression sensor on, with the gates that fired), automations newly failing at run time and entities automations use newly unavailable (from Automation Monitor's sensors), custom integrations newly breaking now or within Breakage Radar's alert window, the agent-memory candidate review not run in 26 h, unable to reach its model or failing on a candidate, the options collector's weekday 16:20 New York run missing, aborted, with over 5% of symbols failed or unreadable, a check that failed |
-| info | core and add-on updates, other updates newly available, newly unavailable entities, core log warnings, counts, Supervisor's `no_current_backup` (it counts full backups only, and Home Assistant's automatic backups are partial), custom integrations newly found by Breakage Radar using an API Home Assistant removes, with the earliest release |
+| action | something to do: a Supervisor issue or unhealthy state, no backup holding Home Assistant or a stale one (full, or partial with Home Assistant; an add-on's own backup does not count), Uptime Kuma monitors down, safety devices or locks newly unavailable, a WAN newly offline |
+| warn | worth a look: disk, a jump in unavailable entities, core log errors, an unsupported Supervisor, batteries newly under 20%, automation or script references to missing entities, an agent harness newly regressed (the Agent Harness Performance Tracker's regression sensor on, with the gates that fired), automations newly failing at run time and entities automations use newly unavailable (from Automation Monitor's sensors), custom integrations newly breaking now or within Breakage Radar's alert window, the agent-memory candidate review not run in 26 h, unable to reach its model or failing on a candidate, the options collector's weekday 16:20 New York run missing, aborted, with over 5% of symbols failed or unreadable, a check that failed; network items newly found (below) and network sources that could not be read |
+| info | core and add-on updates, other updates newly available, newly unavailable entities, core log warnings, counts, Supervisor's `no_current_backup` (it counts full backups only, and Home Assistant's automatic backups are partial), custom integrations newly found by Breakage Radar using an API Home Assistant removes, with the earliest release; duplicate firewall policies, DNS to outside resolvers unblocked |
 
 Safety devices, batteries, other updates, broken references, harness regressions and the Automation Monitor and Breakage Radar findings are reported only when new since the previous run; a regression is reported again when another gate fires, and a failing automation when its failing step changes. The monitors check needs the Automation Monitor and Breakage Radar integrations; without their sensors it reports itself failed. Monitors named in `kuma_ignore` are left out of the down check.
 
@@ -21,3 +21,21 @@ HVAC energy per cooling degree-day (loop 7). `hvac_zones` lists `name=statistic_
 Manual actions (loop 4). A websocket subscription keeps, per local day, every change of an actionable entity (lights, fans, climate, switches, locks, covers, media players, scenes, vacuums, input booleans) and every change a person made through Home Assistant, the controllable fields it changed recorded as the action. Connection gaps and time the add-on was not running are written down, and a day with one is not complete. The nightly run scores trivial policies on the later third of complete days: none, the most frequent action given the moment of an action, and an hour bucket (an action seen on two or more training days in the same weekday or weekend hour, predicted at every five-minute boundary of that hour), each with what it reproduced and its false positives. The score is provisional until 60 complete days exist.
 
 `collector_url` (absent means `http://local-collector:8092`, empty turns it off) is the options collector add-on whose `/runs` the run reads: an info line for a good weekday run (a holiday run that only deduplicated is good), a warn when the run is missing, aborted or over 5% failed, or the collector cannot be read.
+
+Network checks. `unifi_url` (absent means `https://10.20.52.1`, empty turns them off) is the UniFi OS gateway, read with `unifi_username` and `unifi_password`, a read-only local account without two-factor sign-in.
+
+| Key | Item |
+|---|---|
+| `wan_down:<WAN>` | the WAN's status is offline, or its link is down |
+| `wan_degraded:<WAN>` | under 99% availability in the controller's uptime statistics |
+| `wan_latency:<WAN>` | latency at least twice and 20 ms above the median of up to 14 previous nights, once five are held |
+| `isolation:<network>` | a network in `isolated_networks` that UniFi does not isolate, whose first broad policy (every protocol, port and connection state, always) to the internal zone allows; user policies come before predefined ones, and narrower ALLOW policies before it are its exceptions |
+| `camera_network:<mac>` | a UniFi Protect device, by MAC from Home Assistant's device registry, connected outside `camera_network` |
+| `external_mac:<policy id>` | an ALLOW policy from the External zone matched on a MAC |
+| `source_port:<policy id>` | a policy with a source port and no destination port |
+| `duplicate_policy:<policy id>` | a policy identical to an earlier one but for its name |
+| `dns_egress` | no policy blocks or rejects port 53 or 853 to the External zone |
+| `port_forward:<id>` | an enabled port forward |
+| `upnp` | UPnP on the gateway |
+
+An item is reported when its key is new or its value changed since the previous run; the first run reports everything current. Each finding names its items' keys as `dismiss: <key>`; keys in `network_dismiss` are not reported. A source that cannot be read is a warn every run, and the items of its rules stay as they were. `/api/network.json` holds the current items, the dismissed keys, the WAN readings, the latency history and the field names read from the controller.

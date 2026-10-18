@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0
+
+- Network checks against the UniFi controller (`network.py`), read nightly with a read-only local account (`unifi_url`, `unifi_username`, `unifi_password`): each WAN offline, under 99% availability, or with latency at least twice and 20 ms above its 14-night median; networks in `isolated_networks` that UniFi does not isolate and whose first broad policy to the internal zone allows; UniFi Protect devices, by MAC from Home Assistant's device registry, connected outside `camera_network`; ALLOW policies from the internet matched on a MAC; policies with a source port and no destination port; duplicate policies; no policy blocking port 53 or 853 to the internet; port forwards; UPnP on.
+- Each item has a key, shown in the finding as `dismiss: <key>`, and is reported when new or changed since the previous run; keys in `network_dismiss` are never reported. A source that cannot be read is a warn every run, and its rules' items stay as they were.
+- `/api/network.json`: the current items, dismissed keys, WAN readings, latency history and the field names read from the controller.
+- Network findings beyond the top four stay in the phone summary.
+
 ## 0.9.1
 
 - An expanded finding stays open: the page redraws on a width change only, and a refresh keeps open findings open.

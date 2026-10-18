@@ -4,13 +4,14 @@
 
 Once a day at `run_at` (local time) the check suite runs against the Supervisor and
 core APIs with the add-on's own token, the last day of the logbook is mined for
-overrides, the HVAC energy per degree-day is brought up to date (loop 7) and the
-manual-action record is scored (loop 4), findings and the corpus are written under
+overrides, the HVAC energy per degree-day is brought up to date (loop 7), the
+manual-action record is scored (loop 4), the UniFi network is checked, findings and the corpus are written under
 /data, and a summary goes to the notify target. A websocket subscription records
 manual actions as they happen. The ingress page charts the latest findings, the
 run history, the override ranking, the HVAC weeks and days and the action record
 from /api/latest.json, /api/history.json, /api/overrides.json,
-/api/controller.json and /api/actions.json, which serve other tools too.
+/api/controller.json and /api/actions.json, which serve other tools too;
+/api/network.json holds the network checks' current state.
 Standard library only.
 """
 
@@ -33,6 +34,7 @@ import checks
 import collector as col
 import controller as ctl
 import hass_ws
+import network as nw
 import overrides as ov
 import page
 from zoneinfo import ZoneInfo
@@ -150,6 +152,16 @@ class Loops:
             title += " (provisional)"
         return [checks.finding("manual_actions", "info", title, value=s)]
 
+    def network(self, previous: dict | None) -> tuple[list[dict], dict | None]:
+        def cameras() -> dict[str, str]:
+            with self.socket() as ws:
+                return nw.protect_macs(ws)
+
+        try:
+            return nw.check(self.options, previous, cameras)
+        except Exception as err:
+            return [checks.finding("network", "warn", f"check network failed: {type(err).__name__}: {err}")], None
+
     def run_once(self) -> dict:
         with self.lock:
             started = time.monotonic()
@@ -168,6 +180,10 @@ class Loops:
                 findings.append(checks.finding("overrides", "warn", f"logbook read failed: {type(err).__name__}: {err}"))
             findings += self.loop7(now)
             findings += self.loop4(now)
+            out, net = self.network(state.get("network"))
+            findings += out
+            if net is not None:
+                new_state["network"] = net
             counts = {s: sum(1 for f in findings if f["severity"] == s) for s in ("action", "warn", "info")}
             run = {
                 "ran_at": now.isoformat(timespec="seconds"),
@@ -193,7 +209,7 @@ class Loops:
         lines = [f"{c['action']} action, {c['warn']} warn, {c['info']} info; {run['overrides']} overrides yesterday"]
         lines += [f"- {f['title']}" for f in top[:4]]
         # The memory review and the options collector have their own lines, so a busy night does not push them out of the top four.
-        lines += [f"- {f['title']}" for f in top[4:] if f["check"] in ("memory_review", "options_collector")]
+        lines += [f"- {f['title']}" for f in top[4:] if f["check"] in ("memory_review", "options_collector") or f["check"].startswith("network")]
         code = self.api.post_core(f"/services/notify/{target}", {"title": "Loops: nightly checks", "message": "\n".join(lines)})
         if code >= 300:
             LOG.warning("notify %s answered %s", target, code)
@@ -260,6 +276,8 @@ def make_handler(loops: Loops):
                 today = loops.now().astimezone(loops.tz()).date().isoformat()
                 doc = {"connected_since": c.connected_since, "today": c.today(today), "gaps": c.gaps()[-50:], "score": score}
                 self._send(200, json.dumps(doc).encode(), "application/json")
+            elif path == "/api/network.json":
+                self._send(200, json.dumps(loops.store.state().get("network")).encode(), "application/json")
             elif path == "/api/history.json":
                 self._send(200, json.dumps(loops.store.history()).encode(), "application/json")
             elif path in ("/", "/index.html"):
