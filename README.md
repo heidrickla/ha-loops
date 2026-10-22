@@ -61,7 +61,7 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `/healthz` | `ok`, for the watchdog |
 | `/api/latest.json` | the latest run's findings |
 | `/api/history.json` | the run history |
-| `/api/overrides.json` | the override ranking |
+| `/api/overrides.json` | the override ranking: per automation, `runs_undone` (one per automation run a person undid, whatever entities it changed), `overrides` (manual changes), `fired` and `rate` (runs undone over fired) over 30 days |
 | `/api/snapshot.json` | unavailable or unknown entities and ERROR/WARNING log signatures, read live, with `stop_signatures`: the occurrences logged in the last 15 s before Core exited; 502 when a read fails |
 | `/api/controller.json` | the last 60 HVAC days with their inputs' counts, and every week |
 | `/api/actions.json` | the collector's connection, today's stream and action rows, its gaps and the latest score |

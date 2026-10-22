@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- The override ranking counts automation runs undone: overrides whose automation changes fall within 5 s of each other count once, whatever entities or devices the run changed. `rate` is runs undone over fires; `overrides` stays the count of manual changes. Each run record carries `runs_undone`, which the panel shows.
+
 ## 0.10.0
 
 - Network checks against the UniFi controller (`network.py`), read nightly with a read-only local account (`unifi_url`, `unifi_username`, `unifi_password`): each WAN offline, without state on the gateway, under 99% availability, or with latency at least twice and 20 ms above its 14-night median; networks in `isolated_networks` that UniFi does not isolate and whose first broad policy to the internal zone allows; UniFi Protect devices (the devices of the `unifiprotect` config entry, by MAC) connected outside `camera_network`; ALLOW policies from the internet matched on a MAC; policies with a source port and no destination port; duplicate policies, and policies sharing a name within a zone pair; port 53 or 853 not blocked from the internal zone to the internet; port forwards; UPnP on.

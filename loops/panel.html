@@ -152,7 +152,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; gap: 18px; flex-wr
     <div class="card kpi"><div class="label"><i class="dot action"></i>Action</div><div class="value" id="k-action">–</div><div class="note" id="k-action-note"></div></div>
     <div class="card kpi"><div class="label"><i class="dot warn"></i>Warn</div><div class="value" id="k-warn">–</div><div class="note" id="k-warn-note"></div></div>
     <div class="card kpi"><div class="label"><i class="dot info"></i>Info</div><div class="value" id="k-info">–</div><div class="note" id="k-info-note"></div></div>
-    <div class="card kpi"><div class="label">Overrides found</div><div class="value" id="k-over">–</div><div class="note" id="k-over-note"></div></div>
+    <div class="card kpi"><div class="label">Automation runs undone</div><div class="value" id="k-over">–</div><div class="note" id="k-over-note"></div></div>
   </section>
 
   <section class="card" aria-labelledby="find-title">
@@ -183,8 +183,8 @@ footer { color: var(--muted); font-size: 12px; display: flex; gap: 18px; flex-wr
 
   <section class="card" aria-labelledby="rank-title">
     <h2 id="rank-title">Most overridden automations, last 30 days</h2>
-    <div class="sub">Overrides per automation, with how often it fired.</div>
-    <div class="chart" id="rank-wrap"><svg id="rank" role="img" aria-label="Overrides per automation"></svg><div class="tip" id="rank-tip"></div></div>
+    <div class="sub">Runs undone per automation in 30 days, against how often it fired. One run counts once, whatever entities it changed.</div>
+    <div class="chart" id="rank-wrap"><svg id="rank" role="img" aria-label="Runs undone per automation"></svg><div class="tip" id="rank-tip"></div></div>
   </section>
 
   <section class="card" aria-labelledby="cdd-title">
@@ -395,8 +395,8 @@ function renderKpis() {
     const before = prev ? counts(prev)[key] || 0 : null;
     $("k-" + key + "-note").textContent = v === null ? "" : before === null ? "first run" : v === before ? "same as the run before" : (v > before ? "+" : "") + (v - before) + " on the run before";
   }
-  $("k-over").textContent = L ? String(L.overrides || 0) : "–";
-  $("k-over-note").textContent = L ? num(L.automations_fired || 0, 0) + " automation runs checked" : "";
+  $("k-over").textContent = L ? String(L.runs_undone ?? L.overrides ?? 0) : "–";
+  $("k-over-note").textContent = L ? num(L.overrides || 0, 0) + " manual changes, " + num(L.automations_fired || 0, 0) + " automation runs checked" : "";
 }
 function renderFindings() {
   const box = $("findings");
@@ -471,25 +471,28 @@ function renderRanking() {
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   svg.setAttribute("height", H);
   if (!top.length) { text(svg, W / 2, 30, "No manual change undid an automation in the last 30 days", "ink2", "middle"); return; }
-  const hi = Math.max(...top.map((a) => a.overrides));
+  const runs = (a) => a.runs_undone ?? a.overrides;
+  const hi = Math.max(...top.map(runs));
   const x = (v) => L + (W - L - R) * v / hi;
   const maxChars = Math.floor((L - 12) / 6.4);
   top.forEach((a, i) => {
     const y0 = T + i * rowH;
     const name = a.name || a.automation;
     text(svg, L - 10, y0 + 16, name.length > maxChars ? name.slice(0, maxChars - 1) + "…" : name, "ink2", "end");
-    const w = Math.max(3, x(a.overrides) - L), rr = Math.min(4, w / 2);
+    const n = runs(a);
+    const w = Math.max(3, x(n) - L), rr = Math.min(4, w / 2);
     const path = "M" + L + " " + (y0 + 5) + "H" + (L + w - rr) + "Q" + (L + w) + " " + (y0 + 5) + " " + (L + w) + " " + (y0 + 5 + rr) + "V" + (y0 + 19 - rr) + "Q" + (L + w) + " " + (y0 + 19) + " " + (L + w - rr) + " " + (y0 + 19) + "H" + L + "Z";
     const bar = el("path", { d: path, fill: css("--s1") }, svg);
-    const rate = a.fired ? " of " + num(a.fired, 0) + " runs, " + (a.overrides / a.fired * 100).toFixed(1) + "%" : "";
-    const lab = text(svg, L + w + 8, y0 + 16, String(a.overrides), "ink");
+    const rate = a.fired ? " of " + num(a.fired, 0) + " runs, " + (n / a.fired * 100).toFixed(1) + "%" : "";
+    const lab = text(svg, L + w + 8, y0 + 16, String(n), "ink");
     if (rate) { const t = el("tspan", { class: "ink2" }, lab); t.textContent = rate; t.setAttribute("style", "font-weight:400;fill:var(--muted)"); }
     const hit = el("rect", { x: 0, y: y0, width: W, height: rowH, fill: "transparent" }, svg);
     hit.addEventListener("pointermove", () => {
       bar.setAttribute("opacity", "0.75");
       const sc = scaleOf(svg, W);
       tipShow(tip, wrap, (L + w) / sc, (y0 + 12) / sc, name, [
-        { key: css("--s1"), value: String(a.overrides), label: "overrides" + (a.fired ? ", fired " + num(a.fired, 0) + " times" : "") },
+        { key: css("--s1"), value: String(n), label: "runs undone" + (a.fired ? " of " + num(a.fired, 0) + " runs" : "") },
+        { value: String(a.overrides), label: "manual changes" },
         ...Object.entries(a.entities || {}).slice(0, 6).map(([e, n]) => ({ value: "x" + n, label: e })),
         { value: "", label: "last " + dtf.full.format(new Date(a.last)) },
       ]);

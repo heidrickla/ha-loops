@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import datetime as dt
 import json
 import sys
@@ -360,6 +361,7 @@ def test_override_detection_and_ranking(tmp_path):
     corpus.add_fires("2026-09-19", ov.automation_fires(LOGBOOK))
     ranking = corpus.ranking(days=36500)
     assert ranking[0]["automation"] == "automation.hall_motion" and ranking[0]["overrides"] == 1 and ranking[0]["fired"] == 1 and ranking[0]["rate"] == 1.0
+    assert ranking[0]["runs_undone"] == 1
 
 
 def test_an_override_is_stored_and_counted_once(tmp_path):
@@ -377,10 +379,47 @@ def test_an_override_is_stored_and_counted_once(tmp_path):
     assert corpus.ranking(days=36500)[0]["overrides"] == 1
 
 
+def _override(automation, entity, auto_at, later, base="2026-09-19T20:00:00+00:00"):
+    t0 = dt.datetime.fromisoformat(base)
+    when = t0 + dt.timedelta(seconds=auto_at + later)
+    return {"when": when.isoformat(), "entity_id": entity, "automation": automation, "automation_name": automation, "automation_set": "on", "person_set": "off", "seconds_later": later, "user": "u1"}
+
+
+def test_one_automation_run_undone_counts_once_whatever_it_changed(tmp_path):
+    # One run of the bath automation turned on two lights; the person turned both off a few seconds apart.
+    one_run = [_override("automation.bath", "light.vanity", 0, 30), _override("automation.bath", "light.ceiling", 0.4, 33)]
+    assert ov.runs_undone(one_run) == 1
+    # A later run undone again is a second run.
+    assert ov.runs_undone([*one_run, _override("automation.bath", "light.vanity", 600, 20)]) == 2
+    # A run whose actions are chained 4 s apart is still one run; a 6 s gap starts another.
+    assert ov.runs_undone([_override("automation.bath", f"light.l{i}", 4 * i, 10) for i in range(3)]) == 1
+    assert ov.runs_undone([_override("automation.bath", "light.a", 0, 10), _override("automation.bath", "light.b", 6, 10)]) == 2
+    # Two automations changing things at the same moment are two runs.
+    assert ov.runs_undone([_override("automation.bath", "light.a", 0, 10), _override("automation.hall", "light.b", 0, 10)]) == 2
+    # The run time is the automation's change, not the person's: undone 1 s and 200 s later, the same run.
+    assert ov.runs_undone([_override("automation.bath", "light.a", 0, 1), _override("automation.bath", "light.b", 0.2, 200)]) == 1
+    # A row stored without seconds_later is read at its own time.
+    bare = _override("automation.bath", "light.a", 0, 0)
+    del bare["seconds_later"]
+    assert ov.runs_undone([bare]) == 1 and ov.run_time(bare) == dt.datetime.fromisoformat(bare["when"])
+    assert ov.runs_undone([]) == 0
+
+    corpus = ov.Corpus(str(tmp_path))
+    corpus.append([*one_run, _override("automation.hall", "light.hall", 100, 15), _override("automation.hall", "light.hall", 900, 15)])
+    corpus.add_fires("2026-09-19", collections.Counter({"automation.bath": 4, "automation.hall": 10}))
+    ranking = corpus.ranking(days=36500)
+    # Ranked by runs undone: the hall's two runs beat the bath's one run with two changes.
+    assert [a["automation"] for a in ranking] == ["automation.hall", "automation.bath"]
+    bath = ranking[1]
+    assert bath["runs_undone"] == 1 and bath["overrides"] == 2 and bath["rate"] == 0.25
+    assert bath["entities"] == {"light.vanity": 1, "light.ceiling": 1} and "rows" not in bath
+    assert ranking[0]["runs_undone"] == 2 and ranking[0]["rate"] == 0.2
+
+
 def test_run_once_writes_findings_corpus_and_notifies(supervisor, tmp_path):
     loops = srv.Loops(options(), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
     run = loops.run_once()
-    assert run["counts"]["action"] >= 2 and run["overrides"] == 1
+    assert run["counts"]["action"] >= 2 and run["overrides"] == 1 and run["runs_undone"] == 1
     assert (tmp_path / "findings" / "2026-09-20.json").exists() and (tmp_path / "latest.json").exists()
     assert json.loads((tmp_path / "state.json").read_text())["last_run"] == run["ran_at"]
     assert len(loops.store.history()) == 1
@@ -407,7 +446,7 @@ def test_server_serves_dark_page_and_json(supervisor, tmp_path):
         assert latest["counts"]["action"] >= 2
         assert any(f["title"].startswith("Newest backup") for f in latest["findings"])
         ranking = json.loads(urllib.request.urlopen(base + "/api/overrides.json").read())
-        assert ranking[0]["name"] == "Hall motion"
+        assert ranking[0]["name"] == "Hall motion" and ranking[0]["runs_undone"] == 1
         history = json.loads(urllib.request.urlopen(base + "/api/history.json").read())
         assert len(history) == 1 and history[0]["counts"] == latest["counts"]
     finally:

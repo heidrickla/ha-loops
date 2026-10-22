@@ -190,6 +190,7 @@ class Loops:
                 "findings": findings,
                 "counts": counts,
                 "overrides": len(found),
+                "runs_undone": ov.runs_undone(found),
                 "automations_fired": sum(fires.values()) if fires else 0,
                 "seconds": round(time.monotonic() - started, 1),
             }
@@ -259,7 +260,7 @@ def make_handler(loops: Loops):
             elif path == "/api/latest.json":
                 self._send(200, json.dumps(loops.store.latest()).encode(), "application/json")
             elif path == "/api/overrides.json":
-                self._send(200, json.dumps(loops.corpus.ranking()).encode(), "application/json")
+                self._send(200, json.dumps(loops.corpus.ranking(now=loops.now())).encode(), "application/json")
             elif path == "/api/snapshot.json":
                 try:
                     doc = checks.snapshot(loops.api)

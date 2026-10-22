@@ -10,7 +10,7 @@ Runs the health checks and the override mining once a day at `run_at`, and once 
 
 Safety devices, batteries, other updates, broken references, harness regressions and the Automation Monitor and Breakage Radar findings are reported only when new since the previous run; a regression is reported again when another gate fires, and a failing automation when its failing step changes. The monitors check needs the Automation Monitor and Breakage Radar integrations; without their sensors it reports itself failed. Monitors named in `kuma_ignore` are left out of the down check.
 
-An override is a manual change to an entity within `override_window_s` after an automation changed it, to a different state. The ranking counts them per automation over the last 30 days with the number of times the automation fired.
+An override is a manual change to an entity within `override_window_s` after an automation changed it, to a different state. The ranking counts, per automation over the last 30 days, the runs undone: overrides whose automation changes fall within 5 s of each other undid one run and count once, whatever entities or devices that run changed. The rate is runs undone over the times the automation fired; the manual changes are listed beside it.
 
 `POST /api/run` on the ingress port runs everything now; an override the corpus already holds is not stored again. `GET /api/snapshot.json` reads the unavailable entities and the ERROR/WARNING log signatures live, and answers 502 when a read fails. `stop_signatures` counts the occurrences logged in the last 15 seconds before Core exited, the stop's own noise.
 
