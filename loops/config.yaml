@@ -1,5 +1,5 @@
 name: Loops
-version: "0.11.0"
+version: "0.12.0"
 slug: loops
 description: Nightly health checks with findings that stay as checks, and the corpus of automations the household overrides
 url: https://github.com/heidrickla/ha-loops
@@ -40,12 +40,16 @@ options:
   unifi_url: "https://10.20.52.1"
   unifi_username: ""
   unifi_password: ""
+  unifi_fingerprint: ""
+  unifi_verify_tls: true
   isolated_networks:
     - IoT
     - Cameras
     - Guest
   camera_network: Cameras
   network_dismiss: []
+  api_peers:
+    - a0d7b954-ssh
 schema:
   run_at: match(^([01]\d|2[0-3]):[0-5]\d$)
   notify_target: str?
@@ -69,8 +73,12 @@ schema:
   unifi_url: str?
   unifi_username: str?
   unifi_password: password?
+  unifi_fingerprint: match(^([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}$|^$)?
+  unifi_verify_tls: bool?
   isolated_networks:
     - str?
   camera_network: str?
   network_dismiss:
+    - str?
+  api_peers:
     - str?

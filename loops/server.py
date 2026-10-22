@@ -11,7 +11,8 @@ manual actions as they happen. The ingress page charts the latest findings, the
 run history, the override ranking, the HVAC weeks and days and the action record
 from /api/latest.json, /api/history.json, /api/overrides.json,
 /api/controller.json and /api/actions.json, which serve other tools too;
-/api/network.json holds the network checks' current state.
+/api/network.json holds the network checks' current state. Everything but /healthz
+answers only the Supervisor (ingress), Core and the add-ons named in `api_peers`.
 Standard library only.
 """
 
@@ -23,6 +24,7 @@ import datetime as dt
 import json
 import logging
 import os
+import socket
 import sys
 import threading
 import time
@@ -40,6 +42,24 @@ import page
 from zoneinfo import ZoneInfo
 
 LOG = logging.getLogger("loops")
+# The Supervisor (ingress gateway, watchdog) and Core on the Supervisor network.
+FIXED_PEERS = ("172.30.32.1", "172.30.32.2")
+# Add-ons that may read the API and start a run: the SSH add-on, for the deploy check.
+DEFAULT_API_PEERS = ("a0d7b954-ssh",)
+
+
+def peer_allowed(addr: str, fixed: tuple[str, ...], names, resolve=socket.gethostbyname_ex) -> bool:
+    """An add-on's address changes when it restarts, so its name is resolved at each request."""
+    if addr in fixed:
+        return True
+    for name in names:
+        try:
+            _host, _aliases, addresses = resolve(name)
+        except OSError:
+            continue
+        if addr in addresses:
+            return True
+    return False
 
 
 def load_options(path: str) -> dict:
@@ -238,7 +258,7 @@ class Loops:
                 LOG.exception("nightly run failed")
 
 
-def make_handler(loops: Loops):
+def make_handler(loops: Loops, fixed_peers: tuple[str, ...] = FIXED_PEERS):
     class Handler(BaseHTTPRequestHandler):
         server_version = "loops/0.1"
 
@@ -253,10 +273,20 @@ def make_handler(loops: Loops):
             self.end_headers()
             self.wfile.write(body)
 
+        def _refused(self) -> bool:
+            names = loops.options.get("api_peers")
+            names = DEFAULT_API_PEERS if names is None else [n for n in names if n]
+            if peer_allowed(self.client_address[0], fixed_peers, names):
+                return False
+            self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
+            return True
+
         def do_GET(self):
             path = urlsplit(self.path).path
             if path == "/healthz":
                 self._send(200, b"ok\n", "text/plain; charset=utf-8")
+            elif self._refused():
+                return
             elif path == "/api/latest.json":
                 self._send(200, json.dumps(loops.store.latest()).encode(), "application/json")
             elif path == "/api/overrides.json":
@@ -288,6 +318,8 @@ def make_handler(loops: Loops):
 
         def do_POST(self):
             path = urlsplit(self.path).path
+            if self._refused():
+                return
             if path == "/api/run":
                 run = loops.run_once()
                 self._send(200, json.dumps({"ran_at": run["ran_at"], "counts": run["counts"], "overrides": run["overrides"]}).encode(), "application/json")
@@ -297,8 +329,8 @@ def make_handler(loops: Loops):
     return Handler
 
 
-def serve(loops: Loops, port: int, host: str = "0.0.0.0") -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), make_handler(loops))
+def serve(loops: Loops, port: int, host: str = "0.0.0.0", fixed_peers: tuple[str, ...] = FIXED_PEERS) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), make_handler(loops, fixed_peers))
     threading.Thread(target=server.serve_forever, name="http", daemon=True).start()
     return server
 

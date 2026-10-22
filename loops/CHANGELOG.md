@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0
+
+- Port 8095 answers everything but `/healthz` only to the Supervisor (ingress), Core and the add-ons in `api_peers` (default `a0d7b954-ssh`), resolved at each request; others get 403.
+- The UniFi gateway's certificate is checked before the login is sent: `unifi_fingerprint` pins it by SHA-256; without a pin the system store verifies it, and `unifi_verify_tls` off accepts any.
+
 ## 0.11.0
 
 - The override ranking counts automation runs undone: overrides whose automation changes fall within 5 s of each other count once, whatever entities or devices the run changed. `rate` is runs undone over fires; `overrides` stays the count of manual changes. Each run record carries `runs_undone`, which the panel shows.

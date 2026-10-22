@@ -12,7 +12,7 @@ Safety devices, batteries, other updates, broken references, harness regressions
 
 An override is a manual change to an entity within `override_window_s` after an automation changed it, to a different state. The ranking counts, per automation over the last 30 days, the runs undone: overrides whose automation changes fall within 5 s of each other undid one run and count once, whatever entities or devices that run changed. The rate is runs undone over the times the automation fired; the manual changes are listed beside it.
 
-`POST /api/run` on the ingress port runs everything now; an override the corpus already holds is not stored again. `GET /api/snapshot.json` reads the unavailable entities and the ERROR/WARNING log signatures live, and answers 502 when a read fails. `stop_signatures` counts the occurrences logged in the last 15 seconds before Core exited, the stop's own noise.
+Port 8095 answers `/healthz` to anyone and everything else only to the Supervisor (`172.30.32.2`, which carries ingress), Core (`172.30.32.1`) and the add-ons named in `api_peers` (absent means `a0d7b954-ssh`, the SSH add-on; each name is resolved at every request), others get 403. `POST /api/run` runs everything now; an override the corpus already holds is not stored again. `GET /api/snapshot.json` reads the unavailable entities and the ERROR/WARNING log signatures live, and answers 502 when a read fails. `stop_signatures` counts the occurrences logged in the last 15 seconds before Core exited, the stop's own noise.
 
 `memory_url` (absent means `http://10.20.52.10:8765`, empty turns it off) is the agent-memory add-on whose nightly candidate review the run reports from its `/health`: an info line with what it forgot and how many candidates are left for agents, always in the phone summary.
 
@@ -22,7 +22,7 @@ Manual actions (loop 4). A websocket subscription keeps, per local day, every ch
 
 `collector_url` (absent means `http://local-collector:8092`, empty turns it off) is the options collector add-on whose `/runs` the run reads: an info line for a good weekday run (a holiday run that only deduplicated is good), a warn when the run is missing, aborted or over 5% failed, or the collector cannot be read.
 
-Network checks. `unifi_url` (absent means `https://10.20.52.1`, empty turns them off) is the UniFi OS gateway, read with `unifi_username` and `unifi_password`, a read-only local account without two-factor sign-in.
+Network checks. `unifi_url` (absent means `https://10.20.52.1`, empty turns them off) is the UniFi OS gateway, read with `unifi_username` and `unifi_password`, a read-only local account without two-factor sign-in. The gateway's certificate is checked before the login is sent: with `unifi_fingerprint` (its SHA-256, hex with or without colons) only that certificate is accepted; without it the system store verifies it, unless `unifi_verify_tls` is off. `openssl s_client -connect <gateway>:443 </dev/null | openssl x509 -noout -fingerprint -sha256` prints the fingerprint; a renewed certificate needs the new one.
 
 | Key | Item |
 |---|---|

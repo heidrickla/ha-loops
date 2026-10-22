@@ -59,6 +59,12 @@ configuration:
   unifi_password:
     name: UniFi password
     description: That account's password.
+  unifi_fingerprint:
+    name: UniFi certificate fingerprint
+    description: SHA-256 of the gateway's certificate, hex with or without colons. Set, only that certificate is accepted; empty, the certificate is verified against the system store.
+  unifi_verify_tls:
+    name: Verify the UniFi certificate
+    description: Off accepts any certificate when no fingerprint is set.
   isolated_networks:
     name: Isolated networks
     description: Network names that should not reach the internal zone. A finding when UniFi does not isolate one and the first broad policy from it to the internal zone allows.
@@ -68,3 +74,6 @@ configuration:
   network_dismiss:
     name: Dismissed network findings
     description: Keys of network findings not to report, as each finding names them, e.g. wan_down:WAN4.
+  api_peers:
+    name: API peers
+    description: Host names of add-ons that may read the API and start a run, besides the Supervisor and Home Assistant. Each is resolved at every request.

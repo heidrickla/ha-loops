@@ -44,9 +44,12 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `collector_url` | `http://local-collector:8092` | the options collector add-on whose weekday run is checked; empty turns the check off |
 | `unifi_url` | `https://10.20.52.1` | the UniFi OS gateway; empty turns the network checks off |
 | `unifi_username`, `unifi_password` | empty | a read-only local account without two-factor sign-in |
+| `unifi_fingerprint` | empty | SHA-256 of the gateway's certificate; set, only that certificate is accepted |
+| `unifi_verify_tls` | true | without a fingerprint, verify the certificate against the system store; off accepts any |
 | `isolated_networks` | `IoT`, `Cameras`, `Guest` | networks that should not reach the internal zone |
 | `camera_network` | `Cameras` | the network every UniFi Protect device should be on; empty turns the check off |
 | `network_dismiss` | empty | keys of network findings not to report, e.g. `wan_down:WAN4` |
+| `api_peers` | `a0d7b954-ssh` | add-on host names that may read the API and start a run, besides the Supervisor and Core |
 | `hvac_zones` | empty | `name=statistic_id[,statistic_id]` per zone: the energy statistics of the circuits that run it |
 | `outdoor_temperature` | empty | statistic id of an outdoor temperature with hourly means |
 | `controller_arm` | `baseline` | label of the thermostat settings in force, recorded per day |
@@ -54,6 +57,8 @@ Rule for the check suite: a finding that is fixed leaves its check behind. The s
 | `energy_meter` | empty | statistic id of the panel's total energy; an hour it did not move counts every circuit's hour as missing |
 
 ## Endpoints
+
+`/healthz` answers anyone; every other path answers the Supervisor (ingress), Core and `api_peers` only, others get 403.
 
 | Path | Answers |
 |---|---|

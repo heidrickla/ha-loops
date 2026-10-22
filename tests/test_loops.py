@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import sys
 import threading
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -429,7 +430,7 @@ def test_run_once_writes_findings_corpus_and_notifies(supervisor, tmp_path):
 
 def test_server_serves_dark_page_and_json(supervisor, tmp_path):
     loops = srv.Loops(options(notify_target=""), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
-    http = srv.serve(loops, 0, host="127.0.0.1")
+    http = srv.serve(loops, 0, host="127.0.0.1", fixed_peers=("127.0.0.1",))
     base = f"http://127.0.0.1:{http.server_address[1]}"
     try:
         assert urllib.request.urlopen(base + "/healthz").read() == b"ok\n"
@@ -748,3 +749,44 @@ def test_the_nightly_run_measures_hvac_and_scores_the_action_record(supervisor, 
     unset = srv.Loops(options(), str(tmp_path / "x"), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
     unset.socket = StatsSocket
     assert unset.loop7(NOW)[0]["title"].startswith("loop 7 not measuring")
+
+
+def test_only_the_supervisor_core_and_named_add_ons_reach_the_api(supervisor, tmp_path):
+    loops = srv.Loops(options(notify_target=""), str(tmp_path), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    http = srv.serve(loops, 0, host="127.0.0.1")  # the real peers: 127.0.0.1 is none of them
+    base = f"http://127.0.0.1:{http.server_address[1]}"
+
+    def status(path, data=None):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(base + path, data=data, method="POST" if data is not None else "GET"), timeout=10) as resp:
+                return resp.status
+        except urllib.error.HTTPError as err:
+            return err.code
+
+    try:
+        assert status("/healthz") == 200
+        for path in ("/", "/api/latest.json", "/api/snapshot.json", "/api/network.json", "/api/overrides.json"):
+            assert status(path) == 403, path
+        assert status("/api/run", b"{}") == 403
+        assert loops.store.history() == [], "a refused run never ran"
+        loops.options = {**loops.options, "api_peers": ["localhost"]}
+        assert status("/api/latest.json") == 200
+        loops.options = {**loops.options, "api_peers": []}
+        assert status("/api/latest.json") == 403
+    finally:
+        http.shutdown()
+
+
+def test_a_peer_name_is_resolved_at_each_request():
+    seen = []
+
+    def resolve(name):
+        seen.append(name)
+        if name == "gone":
+            raise OSError("no such host")
+        return name, [], ["172.30.33.7"]
+
+    assert srv.peer_allowed("172.30.32.2", srv.FIXED_PEERS, [], resolve)
+    assert srv.peer_allowed("172.30.33.7", srv.FIXED_PEERS, ["gone", "a0d7b954-ssh"], resolve)
+    assert not srv.peer_allowed("172.30.33.8", srv.FIXED_PEERS, ["a0d7b954-ssh"], resolve)
+    assert seen == ["gone", "a0d7b954-ssh", "a0d7b954-ssh"]

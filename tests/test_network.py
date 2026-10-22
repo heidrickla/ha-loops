@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
 import json
+import ssl
+import subprocess
 import sys
 import threading
 import urllib.request
@@ -118,6 +121,7 @@ class FakeUnifi(BaseHTTPRequestHandler):
     docs: ClassVar[dict] = {}
     fail: ClassVar[set] = set()
     logouts: ClassVar[list] = []
+    logins: ClassVar[list] = []
 
     def log_message(self, *a):
         pass
@@ -134,6 +138,7 @@ class FakeUnifi(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         if self.path == "/api/auth/login":
+            FakeUnifi.logins.append(self.path)
             if json.loads(body) == {"username": "ro", "password": "pw"}:
                 self._send(200, {}, [("Set-Cookie", "TOKEN=abc; Path=/"), ("X-CSRF-Token", "csrf1")])
             else:
@@ -434,7 +439,7 @@ def test_the_nightly_run_reports_network_items_and_serves_them(supervisor, unifi
     message = FakeSupervisor.posted[-1][1]["message"]
     assert run["counts"]["action"] + run["counts"]["warn"] > 4, "control: network lines are past the top four"
     assert all(f"- {f['title']}" in message for f in run["findings"] if f["check"].startswith("network"))
-    http = srv.serve(loops, 0, host="127.0.0.1")
+    http = srv.serve(loops, 0, host="127.0.0.1", fixed_peers=("127.0.0.1",))
     try:
         doc = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{http.server_address[1]}/api/network.json").read())
     finally:
@@ -444,3 +449,71 @@ def test_the_nightly_run_reports_network_items_and_serves_them(supervisor, unifi
     later = loops.now() + dt.timedelta(days=1)
     loops.now = lambda: later
     assert not [f for f in loops.run_once()["findings"] if f["check"].startswith("network_")]
+
+
+# ------------------------------------------------------------------ the gateway's certificate
+
+
+@pytest.fixture
+def tls_unifi(tmp_path):
+    """The fake controller on https with a self-signed certificate, as the gateway serves."""
+
+    def ossl(*args):
+        subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=tmp_path)
+
+    ossl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "k.pem", "-out", "c.pem", "-days", "2", "-subj", "/CN=gateway", "-addext", "subjectAltName=IP:127.0.0.1")
+    FakeUnifi.docs = copy.deepcopy(DOCS)
+    FakeUnifi.fail = set()
+    FakeUnifi.logouts = []
+    FakeUnifi.logins = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeUnifi)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(tmp_path / "c.pem", tmp_path / "k.pem")
+    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    pem = (tmp_path / "c.pem").read_text()
+    yield f"https://127.0.0.1:{server.server_address[1]}", hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+    server.shutdown()
+    server.server_close()
+
+
+NO_CAMERAS = {k for k in FIRST if not k.startswith("camera_network:")}  # nw.check alone reads no Protect devices
+
+
+def login_failed(findings) -> bool:
+    return any("UniFi login failed" in f["title"] for f in findings)
+
+
+def test_a_pinned_certificate_is_accepted_and_the_checks_run(tls_unifi):
+    url, fingerprint = tls_unifi
+    colons = ":".join(fingerprint[i : i + 2] for i in range(0, 64, 2)).upper()
+    findings, state = nw.check(opts(url, unifi_fingerprint=colons), None)
+    assert not login_failed(findings) and set(state["items"]) == NO_CAMERAS and FakeUnifi.logins == ["/api/auth/login"]
+
+
+def test_a_certificate_that_is_not_the_pinned_one_gets_no_credentials(tls_unifi):
+    url, fingerprint = tls_unifi
+    other = ("0" if fingerprint[0] != "0" else "1") + fingerprint[1:]
+    findings, state = nw.check(opts(url, unifi_fingerprint=other), None)
+    assert login_failed(findings) and state is None and FakeUnifi.logins == []
+    assert "unifi_fingerprint" in next(f["title"] for f in findings if "login failed" in f["title"])
+
+
+def test_without_a_pin_the_certificate_is_verified_and_a_self_signed_one_gets_no_credentials(tls_unifi):
+    url, _ = tls_unifi
+    findings, state = nw.check(opts(url), None)
+    assert login_failed(findings) and state is None and FakeUnifi.logins == []
+    assert "CERTIFICATE_VERIFY_FAILED" in next(f["title"] for f in findings if "login failed" in f["title"])
+
+
+def test_verification_off_reads_a_self_signed_gateway(tls_unifi):
+    url, _ = tls_unifi
+    findings, state = nw.check(opts(url, unifi_verify_tls=False), None)
+    assert not login_failed(findings) and set(state["items"]) == NO_CAMERAS
+
+
+def test_a_malformed_fingerprint_is_a_finding_and_nothing_is_sent(tls_unifi):
+    url, _ = tls_unifi
+    findings, state = nw.check(opts(url, unifi_fingerprint="not-a-fingerprint"), None)
+    assert state is None and FakeUnifi.logins == []
+    assert any("unifi_fingerprint is not a SHA-256 fingerprint" in f["title"] for f in findings)

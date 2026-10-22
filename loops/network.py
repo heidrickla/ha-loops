@@ -10,6 +10,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import hashlib
+import http.client
 import http.cookiejar
 import ipaddress
 import json
@@ -66,18 +67,63 @@ def plain(doc):
     return doc
 
 
-class Unifi:
-    """The controller API behind the UniFi OS web UI, with a login session."""
+def parse_fingerprint(text: str) -> bytes:
+    """A SHA-256 certificate fingerprint as hex, with or without colons; b"" when empty."""
+    hexa = re.sub(r"[\s:]", "", text or "")
+    if not hexa:
+        return b""
+    if not re.fullmatch(r"[0-9A-Fa-f]{64}", hexa):
+        raise ValueError("unifi_fingerprint is not a SHA-256 fingerprint")
+    return bytes.fromhex(hexa)
 
-    def __init__(self, url: str, timeout: int = 45):
-        # The gateway serves a self-signed certificate.
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    """HTTPS that accepts exactly one certificate, by its SHA-256, and checks it before any request is sent."""
+
+    def __init__(self, pin: bytes):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE  # the pin below is the check
+        super().__init__(context=ctx)
+        self.pin = pin
+
+    def https_open(self, req):
+        pin = self.pin
+
+        class Pinned(http.client.HTTPSConnection):
+            def connect(self):
+                super().connect()
+                der = self.sock.getpeercert(binary_form=True) or b""
+                if hashlib.sha256(der).digest() != pin:
+                    self.sock.close()
+                    raise ssl.SSLCertVerificationError("the certificate does not match unifi_fingerprint")
+
+        return self.do_open(Pinned, req, context=self._context)
+
+
+def tls_handler(options: dict) -> urllib.request.HTTPSHandler:
+    """`unifi_fingerprint` pins the gateway's certificate; without it the system store verifies it,
+    unless `unifi_verify_tls` is off."""
+    pin = parse_fingerprint(str(options.get("unifi_fingerprint") or ""))
+    if pin:
+        return PinnedHTTPSHandler(pin)
+    if options.get("unifi_verify_tls", True) is False:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        return urllib.request.HTTPSHandler(context=ctx)
+    return urllib.request.HTTPSHandler(context=ssl.create_default_context())
+
+
+class Unifi:
+    """The controller API behind the UniFi OS web UI, with a login session."""
+
+    def __init__(self, url: str, timeout: int = 45, tls: urllib.request.HTTPSHandler | None = None):
         self.url = url.rstrip("/")
         self.timeout = timeout
         self.csrf = ""
-        self.opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        tls = tls or urllib.request.HTTPSHandler(context=ssl.create_default_context())
+        self.opener = urllib.request.build_opener(tls, urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def login(self, username: str, password: str) -> None:
         body = json.dumps({"username": username, "password": password}).encode()
@@ -599,7 +645,10 @@ def check(options: dict, previous: dict | None, cameras: Callable[[], dict[str, 
     user, password = options.get("unifi_username") or "", options.get("unifi_password") or ""
     if not user or not password:
         return [finding("network", "warn", "network checks: no UniFi account in the options")], None
-    client = Unifi(url)
+    try:
+        client = Unifi(url, tls=tls_handler(options))
+    except ValueError as err:
+        return [finding("network", "warn", f"network checks: {err}")], None
     try:
         client.login(user, password)
     except Exception as err:
