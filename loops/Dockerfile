@@ -22,7 +22,7 @@ ENV PYTHONUNBUFFERED=1
 
 # The Supervisor's watchdog follows Docker's health state.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
-  CMD curl -fsS -o /dev/null http://127.0.0.1:8095/healthz || exit 1
+  CMD ["/bin/sh", "-c", "curl -fsS -o /dev/null http://127.0.0.1:8095/healthz || exit 1"]
 
 CMD ["/run.sh"]
 
