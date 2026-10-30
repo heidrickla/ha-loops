@@ -16,6 +16,8 @@ A night's findings by severity, each with the check that raised it, from the tes
 1. Select the first button and add the repository.
 2. Select the second button, then Install, then Start. Nothing has to be typed: the checks read the Supervisor and Home Assistant APIs with the add-on's own access.
 
+The add-on runs on amd64 and aarch64.
+
 ## Setup
 
 1. Turn on Show in sidebar and open Loops. The first run happens at start; later runs at `run_at`, 03:30 local time by default.
