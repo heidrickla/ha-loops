@@ -5,6 +5,12 @@ A Home Assistant add-on that checks the installation every night and keeps what 
 [![Add the repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fheidrickla%2Fha-loops)
 [![Open the Loops add-on in your Home Assistant](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=5add8652_loops&repository_url=https%3A%2F%2Fgithub.com%2Fheidrickla%2Fha-loops)
 
+## Screenshots
+
+![The Loops page with action, warn and info counts and the night's findings](docs/images/findings.png)
+
+A night's findings by severity, each with the check that raised it, from the test suite's example installation.
+
 ## Setup
 
 1. Select the first button and add the repository.
