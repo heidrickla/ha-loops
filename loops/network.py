@@ -18,14 +18,12 @@ import re
 import ssl
 import statistics
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
-UNIFI_URL = "https://10.20.52.1"
 SITE = "/proxy/network/api/s/default"
 V2 = "/proxy/network/v2/api/site/default"
-ISOLATED = ("IoT", "Cameras", "Guest")
-CAMERA_NETWORK = "Cameras"
 AVAILABILITY_MIN = 99.0
 LATENCY_NIGHTS = 14
 LATENCY_MIN_NIGHTS = 5
@@ -606,7 +604,7 @@ def evaluate(data: dict, errors: dict[str, str], options: dict, history: dict, c
     if {"networks", "zones", "policies"} & errors.keys():
         undecided |= {"isolation", "external_mac", "source_port", "duplicate_policy", "same_name", "dns_egress"}
     else:
-        names = [n for n in options.get("isolated_networks", list(ISOLATED)) or [] if n]
+        names = [n for n in options.get("isolated_networks") or [] if n]
         for found, und, trouble in (isolation_items(data, names), policy_items(data)):
             items.update(found)
             undecided |= und
@@ -619,7 +617,7 @@ def evaluate(data: dict, errors: dict[str, str], options: dict, history: dict, c
         undecided.add("upnp")
     else:
         items.update(upnp_items(data))
-    network = str(options.get("camera_network", CAMERA_NETWORK) or "")
+    network = str(options.get("camera_network") or "")
     if network and cameras:
         if {"networks", "clients"} & errors.keys():
             undecided.add("camera_network")
@@ -637,14 +635,47 @@ def evaluate(data: dict, errors: dict[str, str], options: dict, history: dict, c
     return items, undecided, history, problems
 
 
-def check(options: dict, previous: dict | None, cameras: Callable[[], dict[str, str]] | None = None) -> tuple[list[dict], dict | None]:
-    """The findings, and the state the next run compares against; None keeps the previous state."""
-    url = str(options.get("unifi_url", UNIFI_URL) or "")
-    if not url:
-        return [], None
+def presented_fingerprint(url: str, timeout: float = 10) -> str:
+    """SHA-256 of the certificate the gateway presents, as colon hex; empty when it cannot be read.
+    Nothing is sent but the TLS handshake."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        return ""
+    try:
+        pem = ssl.get_server_certificate((parts.hostname, parts.port or 443), timeout=timeout)
+    except (OSError, ValueError):
+        return ""
+    digest = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
+    return ":".join(digest[i : i + 2] for i in range(0, 64, 2))
+
+
+def _certificate_refused(err: Exception) -> bool:
+    return isinstance(err, ssl.SSLCertVerificationError) or isinstance(getattr(err, "reason", None), ssl.SSLCertVerificationError)
+
+
+def status(options: dict) -> str:
+    """The network checks are on once a UniFi account is set."""
+    return "on" if options.get("unifi_username") or options.get("unifi_password") else "off"
+
+
+def check(options: dict, previous: dict | None, cameras: Callable[[], dict[str, str]] | None = None, gateway: Callable[[], str] | None = None) -> tuple[list[dict], dict | None]:
+    """The findings, and the state the next run compares against; None keeps the previous state.
+    Off until a UniFi account is set; without `unifi_url` the host's default gateway is tried."""
     user, password = options.get("unifi_username") or "", options.get("unifi_password") or ""
+    if status(options) == "off":
+        return [], None
     if not user or not password:
-        return [finding("network", "warn", "network checks: no UniFi account in the options")], None
+        return [finding("network", "warn", f"network checks: {'unifi_password' if user else 'unifi_username'} is not set")], None
+    url = str(options.get("unifi_url") or "").strip()
+    found = ""
+    if not url:
+        try:
+            found = gateway() if gateway else ""
+        except Exception as err:
+            return [finding("network", "warn", f"network checks: no unifi_url, and the host's gateway could not be read: {type(err).__name__}: {err}")], None
+        if not found:
+            return [finding("network", "warn", "network checks: no unifi_url, and the host has no default gateway to try")], None
+        url = f"https://{found}"
     try:
         client = Unifi(url, tls=tls_handler(options))
     except ValueError as err:
@@ -652,7 +683,10 @@ def check(options: dict, previous: dict | None, cameras: Callable[[], dict[str, 
     try:
         client.login(user, password)
     except Exception as err:
-        return [finding("network", "warn", f"network checks: UniFi login failed: {type(err).__name__}: {err}")], None
+        detail = f"tried {url}, the host's default gateway; set unifi_url if the console is elsewhere" if found else f"at {url}"
+        if _certificate_refused(err) and (seen := presented_fingerprint(url)):
+            detail += f"; it presented a certificate with SHA-256 {seen}: if that is your gateway's, set unifi_fingerprint to it"
+        return [finding("network", "warn", f"network checks: UniFi login failed: {type(err).__name__}: {err}", detail)], None
     try:
         data, errors, paths = read(client)
     finally:

@@ -35,12 +35,14 @@ LOGBOOK = [
 
 SUPERVISOR = {
     "/core/info": {"version": "2026.9.1", "version_latest": "2026.9.2", "update_available": True},
-    "/addons": {
+    "/supervisor/info": {
+        "version": "2026.10.5",
         "addons": [
-            {"name": "Vaultwarden", "slug": "a0d7b954_bitwarden", "version": "0.28.2", "version_latest": "0.28.3", "update_available": True},
-            {"name": "SSH", "slug": "core_ssh", "update_available": False},
-        ]
+            {"name": "Vaultwarden", "slug": "a0d7b954_bitwarden", "version": "0.28.2", "version_latest": "0.28.3", "update_available": True, "state": "started"},
+            {"name": "SSH", "slug": "core_ssh", "update_available": False, "state": "started"},
+        ],
     },
+    "/network/info": {"interfaces": [{"interface": "end0", "primary": True, "ipv4": {"gateway": "127.0.0.1"}}]},
     "/resolution/info": {
         "issues": [
             {"type": "free_space", "context": "system", "reference": None, "uuid": "u1"},
@@ -49,7 +51,7 @@ SUPERVISOR = {
         "unhealthy": [],
         "unsupported": ["os_agent"],
     },
-    "/backups": {
+    "/backups/info": {
         "backups": [
             {"date": "2026-09-01T00:00:00.000000+00:00", "type": "full", "content": {"homeassistant": True}},
             {"date": "2026-09-10T02:00:00.000000+00:00", "type": "partial", "content": {"homeassistant": True}},
@@ -66,12 +68,14 @@ CORE_LOG = "2026-09-19 03:12:01.123 ERROR (Thread-7) [pychromecast.socket_client
 
 class FakeSupervisor(BaseHTTPRequestHandler):
     posted: ClassVar[list] = []
+    paths: ClassVar[list] = []
 
     def log_message(self, *a):
         pass
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        FakeSupervisor.paths.append(path)
         if self.headers.get("Authorization") != "Bearer test-token":
             self.send_response(401)
             self.end_headers()
@@ -107,6 +111,7 @@ def supervisor():
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeSupervisor)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     FakeSupervisor.posted.clear()
+    FakeSupervisor.paths.clear()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
 
@@ -120,9 +125,6 @@ def options(**extra) -> dict:
         "disk_warn_percent": 85,
         "unavailable_warn_delta": 1,
         "log_lines": 500,
-        "memory_url": "",
-        "collector_url": "",
-        "unifi_url": "",
         **extra,
     }
 
@@ -145,8 +147,8 @@ def test_checks_find_each_planted_problem(supervisor):
 
 
 def test_signature_folds_the_varying_parts():
-    a = checks.signature("ERROR", "x.y", "Timeout after 30.5 s talking to 10.20.54.2:8080 for 'kitchen'")
-    b = checks.signature("ERROR", "x.y", "Timeout after 12 s talking to 10.20.54.9:80 for 'hall'")
+    a = checks.signature("ERROR", "x.y", "Timeout after 30.5 s talking to 192.168.1.2:8080 for 'kitchen'")
+    b = checks.signature("ERROR", "x.y", "Timeout after 12 s talking to 192.168.1.9:80 for 'hall'")
     assert a == b == "ERROR x.y: Timeout after <n> s talking to <ip> for <s>"
     assert checks.signature("ERROR", "x.y", "Other failure") != a
 
@@ -232,7 +234,7 @@ def test_a_failing_check_is_a_finding_not_a_crash(supervisor):
 
 
 class StatesApi:
-    """core() from a dict of paths and get("/addons") from a list of names, without HTTP."""
+    """core() from a dict of paths and get("/supervisor/info") from a list of add-on names, without HTTP."""
 
     def __init__(self, docs: dict, addons: tuple = ("Loops",)):
         self.docs = docs
@@ -242,7 +244,7 @@ class StatesApi:
         return self.docs[path]
 
     def get(self, path: str):
-        assert path == "/addons"
+        assert path == "/supervisor/info"
         return {"addons": [{"name": n} for n in self.addons]}
 
 
@@ -344,9 +346,7 @@ def test_broken_refs_that_read_nothing_is_a_failure_not_a_clean_result():
 
 
 def test_down_monitors_leaves_out_ignored_ones():
-    metrics = (
-        'monitor_status{monitor_name="Lab SSH",monitor_type="port"} 0\nmonitor_status{monitor_name="NetBox",monitor_type="http"} 0\nmonitor_status{monitor_name="Zabbix",monitor_type="http"} 1\n'
-    )
+    metrics = 'monitor_status{monitor_name="Lab SSH",monitor_type="port"} 0\nmonitor_status{monitor_name="NetBox",monitor_type="http"} 0\nmonitor_status{monitor_name="Zabbix",monitor_type="http"} 1\n'
     assert checks.down_monitors(metrics) == ["Lab SSH", "NetBox"]
     assert checks.down_monitors(metrics, frozenset({"Lab SSH"})) == ["NetBox"]
 
@@ -516,18 +516,30 @@ def test_monitors_report_each_kind_once_and_a_change_again():
     assert [f["check"] for f in changed] == ["automation_failures"] and "action/3" in changed[0]["detail"]
 
 
-def test_monitors_with_a_sensor_missing_is_a_failure_to_look():
-    for i in range(3):
+def test_automation_monitor_with_one_of_its_two_sensors_is_a_failure_to_look():
+    for i in range(2):
         states = [s for j, s in enumerate(MONITOR_STATES) if j != i]
         with pytest.raises(RuntimeError, match="no sensor found"):
             checks.monitors(StatesApi({"/states": states}), {})
 
 
-def test_run_all_reports_the_monitors_check_failing_when_its_sensors_are_absent(supervisor):
+def test_an_integration_never_seen_is_off_and_one_seen_before_and_gone_is_a_failure_to_look():
+    radar_only = [MONITOR_STATES[2]]
+    out, state = checks.monitors(StatesApi({"/states": radar_only}), None)
+    assert {f["check"] for f in out} == {"breakage_imminent", "breakage_upcoming"} and set(state) == {"near", "later"}
+    assert checks.monitors(StatesApi({"/states": []}), None) == ([], {}), "neither installed: silent"
+    assert checks.monitors(StatesApi({"/states": []}), {}) == ([], {})
+    _, seen = checks.monitors(StatesApi({"/states": MONITOR_STATES}), None)
+    with pytest.raises(RuntimeError, match="no sensor found for failed automations, linked entities, breakage radar"):
+        checks.monitors(StatesApi({"/states": []}), seen)
+    with pytest.raises(RuntimeError, match="no sensor found for breakage radar"):
+        checks.monitors(StatesApi({"/states": MONITOR_STATES[:2]}), seen)
+
+
+def test_run_all_is_silent_about_monitors_that_are_not_installed(supervisor):
     api = checks.Api("test-token", base=supervisor)
     findings, state = checks.run_all(api, options(), {}, NOW)
-    assert any(f["check"] == "monitors" and "no sensor found" in f["title"] for f in findings)
-    assert "monitors" not in state
+    assert not [f for f in findings if f["check"] == "monitors"] and state["monitors"] == {}
 
 
 class FakeMemory(BaseHTTPRequestHandler):
@@ -576,7 +588,7 @@ def test_memory_review_warns_when_it_did_not_run_cleanly(memory):
 
 
 def test_memory_review_is_off_when_empty_and_a_finding_when_unreachable(supervisor):
-    assert checks.memory_url({}) == checks.MEMORY_URL and checks.memory_url({"memory_url": ""}) == ""
+    assert checks.memory_url({}) == "" and checks.memory_url({"memory_url": ""}) == ""
     assert checks.memory_review("", NOW) == []
     api = checks.Api("test-token", base=supervisor)
     findings, _ = checks.run_all(api, options(memory_url="http://127.0.0.1:9"), {}, NOW)
@@ -698,7 +710,7 @@ def test_a_day_before_the_collectors_first_run_is_not_due(collector):
 
 
 def test_an_unreadable_collector_is_could_not_look_and_empty_turns_it_off(supervisor):
-    assert checks.collector_url({}) == checks.COLLECTOR_URL and checks.collector_url({"collector_url": ""}) == ""
+    assert checks.collector_url({}) == "" and checks.collector_url({"collector_url": ""}) == ""
     assert checks.options_collector("", NOW) == []
     [f] = checks.options_collector("http://127.0.0.1:9", NOW)
     assert f["severity"] == "warn" and f["title"].startswith("Options collector: could not look")
@@ -748,7 +760,10 @@ def test_the_nightly_run_measures_hvac_and_scores_the_action_record(supervisor, 
     assert actions and actions[0]["title"].startswith("manual actions: 0 complete days of 60") and actions[0]["title"].endswith("(provisional)")
     unset = srv.Loops(options(), str(tmp_path / "x"), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
     unset.socket = StatsSocket
-    assert unset.loop7(NOW)[0]["title"].startswith("loop 7 not measuring")
+    assert unset.loop7(NOW) == [], "no zones: loop 7 is off and says nothing"
+    half = srv.Loops(options(hvac_zones=hvac["hvac_zones"]), str(tmp_path / "y"), api=checks.Api("test-token", base=supervisor), now=lambda: NOW)
+    half.socket = StatsSocket
+    assert half.loop7(NOW)[0]["title"] == "loop 7 not measuring: hvac_zones and outdoor_temperature are not set"
 
 
 def test_only_the_supervisor_core_and_named_add_ons_reach_the_api(supervisor, tmp_path):

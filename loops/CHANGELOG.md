@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.0
+
+- A fresh install needs no option typed. The form shows `run_at` and `notify_target`; every other option is optional, with its default in the code and its description in the form.
+- The checks that need a service of their own are off until its option is set, and say nothing while off: Uptime Kuma (`kuma_api_key`), the agent-memory review (`memory_url`), the options collector (`collector_url`), the UniFi network checks (`unifi_username` and `unifi_password`) and HVAC per degree-day (`hvac_zones`). `memory_url`, `collector_url`, `unifi_url`, `isolated_networks`, `camera_network` and `api_peers` have empty defaults.
+- With `kuma_api_key` and no `kuma_url`, the Uptime Kuma add-on is found in the Supervisor's add-on list. With a UniFi account and no `unifi_url`, the host's default gateway is tried. A UniFi certificate that is refused has its SHA-256 named in the finding, to set as `unifi_fingerprint`.
+- Automation Monitor and Breakage Radar are found by their sensors: one never seen is silent, one seen before whose sensors are gone is a failed check, as before.
+- A device-only automation config counts as read by the reference check.
+- The run records which optional checks are on (`optional` in `/api/latest.json`), shown on the page and logged at start.
+- `hassio_role` is `homeassistant`, not `manager`: the add-on list comes from `/supervisor/info` and the backups from `/backups/info`, which the default role may read; the Core log needs the `homeassistant` role.
+- The image starts from the multi-architecture `ghcr.io/home-assistant/base:3.21` with a Docker health check in place of the `watchdog` URL; `build.yaml` is gone, and so are the deprecated `advanced` key and `boot` and `stage`, which held their defaults.
+
 ## 0.12.0
 
 - Port 8095 answers everything but `/healthz` only to the Supervisor (ingress), Core and the add-ons in `api_peers` (default `a0d7b954-ssh`), resolved at each request; others get 403.
@@ -26,7 +37,7 @@
 
 ## 0.8.0
 
-- Check `options_collector`: reads the options collector add-on's `/runs` (`collector_url`, absent means `http://local-collector:8092`, empty turns it off). The due run is the latest weekday 16:20 America/New_York whose 3-hour window has closed. Warn when no non-manual run started in the window, the run aborted, more than 5% of the symbols attempted failed, or the collector cannot be read; info when the run is good (a holiday run of only duplicates is good) or the collector's first run is later than the due day. The title carries the day, so each day reports once, and the line stays in the phone summary on a busy night.
+- Check `options_collector`: reads the options collector add-on's `/runs` (`collector_url`; empty turns it off). The due run is the latest weekday 16:20 America/New_York whose 3-hour window has closed. Warn when no non-manual run started in the window, the run aborted, more than 5% of the symbols attempted failed, or the collector cannot be read; info when the run is good (a holiday run of only duplicates is good) or the collector's first run is later than the due day. The title carries the day, so each day reports once, and the line stays in the phone summary on a busy night.
 
 ## 0.7.2
 

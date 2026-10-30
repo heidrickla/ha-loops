@@ -82,10 +82,28 @@ def core_version(api: Api) -> list[dict]:
     return []
 
 
+def installed_addons(api: Api) -> list[dict]:
+    """The installed add-ons from `/supervisor/info`, which the default role may read; the `/addons`
+    list needs the manager role."""
+    addons = (api.get("/supervisor/info") or {}).get("addons")
+    if not isinstance(addons, list):
+        raise RuntimeError("/supervisor/info carries no add-on list")
+    return addons
+
+
+def host_gateway(api: Api) -> str:
+    """The IPv4 default gateway of the host's primary interface, from `/network/info`; empty when none."""
+    interfaces = (api.get("/network/info") or {}).get("interfaces") or []
+    for iface in sorted(interfaces, key=lambda i: not i.get("primary")):
+        gateway = (iface.get("ipv4") or {}).get("gateway")
+        if gateway:
+            return str(gateway)
+    return ""
+
+
 def addon_updates(api: Api) -> list[dict]:
-    addons = api.get("/addons").get("addons", [])
     out = []
-    for a in addons:
+    for a in installed_addons(api):
         if a.get("update_available"):
             out.append(finding("addon_updates", "info", f"Add-on {a.get('name')} {a.get('version')} -> {a.get('version_latest')}", a.get("slug", ""), a.get("slug")))
     return out
@@ -110,7 +128,7 @@ def supervisor_issues(api: Api) -> list[dict]:
 
 def backup_age(api: Api, max_age_days: int, now: dt.datetime) -> list[dict]:
     # An add-on's own partial backup is no restore point for Home Assistant.
-    backups = [b for b in api.get("/backups").get("backups", []) if b.get("type") == "full" or (b.get("content") or {}).get("homeassistant")]
+    backups = [b for b in api.get("/backups/info").get("backups", []) if b.get("type") == "full" or (b.get("content") or {}).get("homeassistant")]
     if not backups:
         return [finding("backup_age", "action", "No backup holds Home Assistant", "ha backups new --filename <name>.tar", None)]
     newest = max(dt.datetime.fromisoformat(b["date"].replace("Z", "+00:00")) for b in backups if b.get("date"))
@@ -199,7 +217,7 @@ def device_health(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
     core_version and addon_updates do not already report."""
     offline, low, updates = {}, {}, {}
     # A local add-on's update entity has no hassio icon, so add-ons are matched by name as well.
-    addons = {a.get("name") for a in (api.get("/addons") or {}).get("addons", [])}
+    addons = {a.get("name") for a in installed_addons(api)}
     for s in api.core("/states"):
         eid, st, attr = s.get("entity_id", ""), s.get("state", ""), s.get("attributes") or {}
         if st == "unavailable" and (attr.get("device_class") in SAFETY_CLASSES or eid.startswith("lock.")):
@@ -261,7 +279,10 @@ def _items(attr: dict, key: str, keys: set[str]) -> list[dict] | None:
 def monitors(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
     """What Automation Monitor and Breakage Radar hold, reported when new: automations failing at
     run time, entities automations use that went unavailable, and custom integrations using an API
-    Home Assistant removes (warn when broken now or within the radar's alert window)."""
+    Home Assistant removes (warn when broken now or within the radar's alert window).
+
+    Each integration is found by its sensors. One never seen is not installed and is silent; one
+    seen in an earlier run whose sensors are gone, or Automation Monitor with one of its two, raises."""
     failed: dict[str, str] | None = None
     linked: dict[str, str] | None = None
     radar: dict | None = None
@@ -275,26 +296,39 @@ def monitors(api: Api, previous: dict | None) -> tuple[list[dict], dict]:
             linked = {r["entity_id"]: f"used by {len(r.get('referenced_by') or [])}" for r in rows}
         elif attr.keys() >= RADAR_KEYS:
             radar = attr
-    if failed is None or linked is None or radar is None:
-        missing = [n for n, v in (("failed automations", failed), ("linked entities", linked), ("breakage radar", radar)) if v is None]
+    previous = previous or {}
+    seen_monitor = previous.get("failed") is not None or previous.get("linked") is not None
+    seen_radar = previous.get("near") is not None or previous.get("later") is not None
+    missing = []
+    if (failed is None) != (linked is None) or (failed is None and seen_monitor):
+        missing += [n for n, v in (("failed automations", failed), ("linked entities", linked)) if v is None]
+    if radar is None and seen_radar:
+        missing.append("breakage radar")
+    if missing:
         raise RuntimeError("no sensor found for " + ", ".join(missing))
-    soon = set(radar.get("broken_now") or {}) | set(radar.get("imminent") or {})
-    later: dict[str, str] = {}
-    near: dict[str, str] = {}
-    for f in radar.get("findings") or []:
-        domain, release = str(f.get("domain") or ""), str(f.get("breaks_in") or "")
-        bucket = near if domain in soon else later
-        if domain and (domain not in bucket or release < bucket[domain]):
-            bucket[domain] = release
 
-    def before(key: str) -> dict | None:
-        return None if previous is None else previous.get(key, {})
+    def before(key: str) -> dict:
+        return previous.get(key) or {}
 
-    out = _new("automation_failures", "warn", "automations newly failing at run time", failed, before("failed"))
-    out += _new("linked_unavailable", "warn", "entities that automations use newly unavailable", linked, before("linked"))
-    out += _new("breakage_imminent", "warn", "custom integrations newly breaking now or within the radar's window", near, before("near"))
-    out += _new("breakage_upcoming", "info", "custom integrations newly found using an API Home Assistant removes", later, before("later"))
-    return out, {"failed": failed, "linked": linked, "near": near, "later": later}
+    out: list[dict] = []
+    state: dict = {}
+    if failed is not None and linked is not None:
+        out += _new("automation_failures", "warn", "automations newly failing at run time", failed, before("failed"))
+        out += _new("linked_unavailable", "warn", "entities that automations use newly unavailable", linked, before("linked"))
+        state |= {"failed": failed, "linked": linked}
+    if radar is not None:
+        soon = set(radar.get("broken_now") or {}) | set(radar.get("imminent") or {})
+        later: dict[str, str] = {}
+        near: dict[str, str] = {}
+        for f in radar.get("findings") or []:
+            domain, release = str(f.get("domain") or ""), str(f.get("breaks_in") or "")
+            bucket = near if domain in soon else later
+            if domain and (domain not in bucket or release < bucket[domain]):
+                bucket[domain] = release
+        out += _new("breakage_imminent", "warn", "custom integrations newly breaking now or within the radar's window", near, before("near"))
+        out += _new("breakage_upcoming", "info", "custom integrations newly found using an API Home Assistant removes", later, before("later"))
+        state |= {"near": near, "later": later}
+    return out, state
 
 
 def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[str]]:
@@ -303,6 +337,7 @@ def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[
     states = api.core("/states")
     live = {s["entity_id"] for s in states}
     refs: set[str] = set()
+    devices = 0
     read = 0
     for s in states:
         eid, attr = s["entity_id"], s.get("attributes") or {}
@@ -313,11 +348,12 @@ def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[
         else:
             continue
         read += 1
+        devices += text.count('"device_id"')
         refs |= {f"{d}.{o}" for d, o in REF.findall(text) if d in REF_DOMAINS and not SERVICE_OBJ.match(o)}
-    # Silence must mean "looked and found nothing": no config read, or configs with no entity in any
-    # of them, is a failure to look.
-    if any(s["entity_id"].startswith(("automation.", "script.")) for s in states) and not (read and refs):
-        raise RuntimeError(f"read {read} automation or script configs and found {len(refs)} entity references")
+    # Silence must mean "looked and found nothing": no config read, or configs with neither an entity
+    # nor a device in any of them, is a failure to look. UI device actions name devices only.
+    if any(s["entity_id"].startswith(("automation.", "script.")) for s in states) and not (read and (refs or devices)):
+        raise RuntimeError(f"read {read} automation or script configs and found {len(refs)} entity references and {devices} device references")
     broken = sorted(refs - live)
     out = _new("broken_refs", "warn", "automation or script references to entities that do not exist", dict.fromkeys(broken, ""), dict.fromkeys(previous, "") if previous is not None else None)
     return out, broken
@@ -350,8 +386,8 @@ def _logged_at(line: str) -> dt.datetime | None:
 def snapshot(api: Api, lines: int = 2000) -> dict:
     """Unavailable or unknown entities and ERROR/WARNING log signatures, read now.
 
-    The deploy check (ha-management tools/ha_deploy_check.py) takes one before a change and two
-    after it, and reports only what is new in both after-readings (from gstack's canary).
+    A deploy check can take one before a change and two after it, and report only what is new in
+    both after-readings.
     `stop_signatures` counts the occurrences logged within STOP_TAIL_S of Core's last line before
     an exit, so the check can tell a restart's own noise from what the change broke."""
     states = api.core("/states")
@@ -420,9 +456,27 @@ def down_monitors(metrics: str, ignore: frozenset[str] = frozenset()) -> list[st
     return down
 
 
+# The Uptime Kuma add-on of the community repository serves on this port inside the add-on network.
+KUMA_PORT = 3001
+
+
+def kuma_url(options: dict, addons: list[dict]) -> str:
+    """`kuma_url`, else the installed Uptime Kuma add-on by its host name; empty when neither."""
+    url = str(options.get("kuma_url") or "").strip()
+    if url:
+        return url
+    for a in addons:
+        slug = str(a.get("slug") or "")
+        if slug.split("_", 1)[-1] == "uptime-kuma":
+            return f"http://{slug.replace('_', '-')}:{KUMA_PORT}"
+    return ""
+
+
 def kuma_down(url: str, key: str, ignore: frozenset[str] = frozenset()) -> list[dict]:
-    if not url or not key:
+    if not key:
         return []
+    if not url:
+        return [finding("kuma_down", "warn", "Uptime Kuma: kuma_api_key is set, but kuma_url is empty and no Uptime Kuma add-on is installed", "set kuma_url", None)]
     auth = base64.b64encode(f":{key}".encode()).decode()
     req = urllib.request.Request(f"{url.rstrip('/')}/metrics", headers={"Authorization": f"Basic {auth}"})
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -431,14 +485,12 @@ def kuma_down(url: str, key: str, ignore: frozenset[str] = frozenset()) -> list[
     return [finding("kuma_down", "action", f"Uptime Kuma: {len(down)} monitors down", ", ".join(down), down)] if down else []
 
 
-# The agent-memory add-on, through the host: its port is published there.
-MEMORY_URL = "http://10.20.52.10:8765"
 MEMORY_REVIEW_MAX_AGE_H = 26.0
 
 
 def memory_url(options: dict) -> str:
-    """Absent means the default: the Supervisor applies option defaults only at install. Empty turns it off."""
-    return str(options.get("memory_url", MEMORY_URL) or "")
+    """The agent-memory service; absent or empty turns the check off."""
+    return str(options.get("memory_url") or "").strip()
 
 
 def memory_review(url: str, now: dt.datetime) -> list[dict]:
@@ -464,16 +516,14 @@ def memory_review(url: str, now: dt.datetime) -> list[dict]:
     return [finding("memory_review", "info", summary, "", block)]
 
 
-# The options collector add-on, through its add-on network name.
-COLLECTOR_URL = "http://local-collector:8092"
 COLLECTOR_AT = dt.time(16, 20)
 COLLECTOR_WINDOW = dt.timedelta(hours=3)
 COLLECTOR_FAILED_MAX = 0.05
 
 
 def collector_url(options: dict) -> str:
-    """Absent means the default: the Supervisor applies option defaults only at install. Empty turns it off."""
-    return str(options.get("collector_url", COLLECTOR_URL) or "")
+    """The options collector; absent or empty turns the check off."""
+    return str(options.get("collector_url") or "").strip()
 
 
 def collector_due(now: dt.datetime) -> dt.datetime:
@@ -560,8 +610,24 @@ def run_all(api: Api, options: dict, state: dict, now: dt.datetime) -> tuple[lis
         except Exception as err:  # state kept as it was, so the next run still compares against a real one
             findings.append(finding(name, "warn", f"check {name} failed: {type(err).__name__}: {err}"))
     findings += guard("core_log_errors", core_log_errors, api, int(options.get("log_lines") or 500))
+    key = str(options.get("kuma_api_key") or "")
     ignore = frozenset(n for n in options.get("kuma_ignore") or [] if n)
-    findings += guard("kuma_down", kuma_down, options.get("kuma_url") or "", options.get("kuma_api_key") or "", ignore)
-    findings += guard("memory_review", memory_review, memory_url(options), now)
-    findings += guard("options_collector", options_collector, collector_url(options), now)
+    kuma, unread = "", None
+    if key:
+        try:
+            kuma = kuma_url(options, installed_addons(api))
+        except Exception as err:
+            unread = err
+    if unread is not None:
+        findings.append(finding("kuma_down", "warn", f"check kuma_down failed: {type(unread).__name__}: {unread}"))
+    else:
+        findings += guard("kuma_down", kuma_down, kuma, key, ignore)
+    memory, collector = memory_url(options), collector_url(options)
+    findings += guard("memory_review", memory_review, memory, now)
+    findings += guard("options_collector", options_collector, collector, now)
+    new_state["optional"] = {
+        "uptime_kuma": (f"on, {kuma}" if kuma else "kuma_api_key set, no kuma_url") if key else "off",
+        "agent_memory": "on" if memory else "off",
+        "options_collector": "on" if collector else "off",
+    }
     return findings, new_state

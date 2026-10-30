@@ -41,11 +41,10 @@ import overrides as ov
 import page
 from zoneinfo import ZoneInfo
 
+VERSION = "0.13.0"
 LOG = logging.getLogger("loops")
-# The Supervisor (ingress gateway, watchdog) and Core on the Supervisor network.
+# The Supervisor (the ingress gateway) and Core on the Supervisor network.
 FIXED_PEERS = ("172.30.32.1", "172.30.32.2")
-# Add-ons that may read the API and start a run: the SSH add-on, for the deploy check.
-DEFAULT_API_PEERS = ("a0d7b954-ssh",)
 
 
 def peer_allowed(addr: str, fixed: tuple[str, ...], names, resolve=socket.gethostbyname_ex) -> bool:
@@ -134,6 +133,8 @@ class Loops:
         return self._collector
 
     def loop7(self, now: dt.datetime) -> list[dict]:
+        if not self.options.get("hvac_zones"):
+            return []
         try:
             today = now.astimezone(self.tz()).date()
             with self.socket() as ws:
@@ -178,7 +179,7 @@ class Loops:
                 return nw.protect_macs(ws)
 
         try:
-            return nw.check(self.options, previous, cameras)
+            return nw.check(self.options, previous, cameras, lambda: checks.host_gateway(self.api))
         except Exception as err:
             return [checks.finding("network", "warn", f"check network failed: {type(err).__name__}: {err}")], None
 
@@ -204,6 +205,7 @@ class Loops:
             findings += out
             if net is not None:
                 new_state["network"] = net
+            optional = {**new_state.pop("optional", {}), **self.optional()}
             counts = {s: sum(1 for f in findings if f["severity"] == s) for s in ("action", "warn", "info")}
             run = {
                 "ran_at": now.isoformat(timespec="seconds"),
@@ -213,6 +215,7 @@ class Loops:
                 "runs_undone": ov.runs_undone(found),
                 "automations_fired": sum(fires.values()) if fires else 0,
                 "seconds": round(time.monotonic() - started, 1),
+                "optional": optional,
             }
             new_state["last_run"] = run["ran_at"]
             self.store.save_state(new_state)
@@ -220,6 +223,10 @@ class Loops:
             self.notify(run)
             LOG.info("run: %s findings %s, %d overrides, %.1fs", counts, "", len(found), run["seconds"])
             return run
+
+    def optional(self) -> dict[str, str]:
+        """The checks that need a service of their own: on once its option is set, silent when off."""
+        return {"unifi_network": nw.status(self.options), "hvac_per_degree_day": "on" if self.options.get("hvac_zones") else "off"}
 
     def notify(self, run: dict) -> None:
         target = (self.options.get("notify_target") or "").strip()
@@ -260,7 +267,7 @@ class Loops:
 
 def make_handler(loops: Loops, fixed_peers: tuple[str, ...] = FIXED_PEERS):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "loops/0.1"
+        server_version = f"loops/{VERSION}"
 
         def log_message(self, fmt, *args):
             LOG.debug(fmt, *args)
@@ -274,8 +281,7 @@ def make_handler(loops: Loops, fixed_peers: tuple[str, ...] = FIXED_PEERS):
             self.wfile.write(body)
 
         def _refused(self) -> bool:
-            names = loops.options.get("api_peers")
-            names = DEFAULT_API_PEERS if names is None else [n for n in names if n]
+            names = [n for n in loops.options.get("api_peers") or [] if n]
             if peer_allowed(self.client_address[0], fixed_peers, names):
                 return False
             self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
@@ -356,7 +362,15 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=loops.collector.run, args=(stop, loops.socket), name="collector", daemon=True).start()
     except Exception:  # without Home Assistant's time zone there is no local day to file by
         LOG.exception("collector not started")
-    LOG.info("serving on :%d, nightly run at %s", args.port, loops.options.get("run_at"))
+    LOG.info("serving on :%d, version %s, nightly run at %s", args.port, VERSION, loops.options.get("run_at") or "03:30")
+    on = {
+        "Uptime Kuma": "on" if loops.options.get("kuma_api_key") else "off (set kuma_api_key)",
+        "agent memory": "on" if checks.memory_url(loops.options) else "off (set memory_url)",
+        "options collector": "on" if checks.collector_url(loops.options) else "off (set collector_url)",
+        "UniFi network": "on" if nw.status(loops.options) == "on" else "off (set unifi_username and unifi_password)",
+        "HVAC per degree-day": "on" if loops.options.get("hvac_zones") else "off (set hvac_zones)",
+    }
+    LOG.info("optional checks: %s", "; ".join(f"{k} {v}" for k, v in on.items()))
     try:
         while True:
             time.sleep(3600)

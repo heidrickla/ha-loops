@@ -35,17 +35,16 @@ jobs:
       - name: yamllint
         timeout-minutes: 15
         run: >-
-          yamllint -d "{extends: relaxed, rules: {line-length: {max: 160}, comments: {min-spaces-from-content: 1}}}"
-          repository.yaml loops/config.yaml loops/build.yaml loops/translations/en.yaml
-          .gitea/workflows/validate.yml
+          yamllint -d "{extends: relaxed, rules: {line-length: {max: 260}, comments: {min-spaces-from-content: 1}}}"
+          repository.yaml loops/config.yaml loops/translations/en.yaml
+          .gitea/workflows/ .github/workflows/
 
       - name: shellcheck
         timeout-minutes: 15
         run: shellcheck loops/run.sh
 
       # The server runs on the base image's python3 (3.12); the checks and the
-      # server are tested against a fake Supervisor. The image is built on the
-      # host by `ha apps rebuild`.
+      # server are tested against a fake Supervisor. The image builds run on GitHub.
       - name: Tests
         timeout-minutes: 15
         run: python -m pytest --durations=15 --junitxml=reports/junit-1.xml -q tests

@@ -4,76 +4,76 @@ configuration:
     description: Local time of the nightly run, HH:MM.
   notify_target:
     name: Notify target
-    description: notify service name for the summary, e.g. mobile_app_pixel. Empty sends nothing.
+    description: The notify service for the nightly summary, such as mobile_app_<device>. Empty sends nothing; the findings are on the Loops page either way.
   override_window_s:
     name: Override window (s)
-    description: A manual change this soon after an automation changed the same entity counts as an override.
+    description: A manual change this soon after an automation changed the same entity counts as an override. Default 300.
   backup_max_age_days:
     name: Backup max age (days)
-    description: A newest backup older than this is a finding.
+    description: A newest backup holding Home Assistant older than this is a finding. Default 7.
   disk_warn_percent:
     name: Disk warning (%)
-    description: Host disk use above this is a finding.
+    description: Host disk use above this is a finding. Default 85.
   unavailable_warn_delta:
     name: Unavailable delta
-    description: This many more unavailable or unknown entities than the previous run is a finding.
+    description: This many more unavailable or unknown entities than the previous run is a warning. Default 25.
   log_lines:
     name: Core log lines
-    description: How many recent core log lines to scan for errors and warnings.
+    description: How many recent Core log lines to scan for errors and warnings. Default 500.
   kuma_url:
     name: Uptime Kuma URL
-    description: Optional. Down monitors become findings.
+    description: Optional. Empty finds the Uptime Kuma add-on if it is installed.
   kuma_api_key:
     name: Uptime Kuma API key
-    description: A key of its own for this add-on.
+    description: Turns the Uptime Kuma check on. An API key of its own for this add-on, from Uptime Kuma's settings; down monitors become findings.
   kuma_ignore:
     name: Ignored monitors
     description: Monitor names whose down state is normal, such as machines that are off unless needed.
   memory_url:
     name: Agent memory URL
-    description: The agent-memory add-on, whose nightly candidate review the run reports. Absent means http://10.20.52.10:8765; empty turns the check off.
+    description: Optional. An agent-memory service whose nightly candidate review the run reports from its /health. Empty turns the check off.
   collector_url:
     name: Options collector URL
-    description: The options collector add-on, whose weekday run the check reads from /runs. Absent means http://local-collector:8092; empty turns the check off.
+    description: Optional. An options collector whose weekday run the check reads from /runs. Empty turns the check off.
   hvac_zones:
     name: HVAC zones
-    description: One entry per zone, name=statistic_id[,statistic_id], the energy statistics of every circuit that runs it (compressor and air handler). Empty turns loop 7 off.
+    description: Turns the HVAC per degree-day loop on. One entry per zone, name=statistic_id[,statistic_id], the energy statistics of every circuit that runs it (compressor and air handler).
   outdoor_temperature:
     name: Outdoor temperature
-    description: The statistic id of an outdoor temperature sensor with hourly means.
+    description: With HVAC zones, the statistic id of an outdoor temperature sensor with hourly means.
   controller_arm:
     name: Controller arm
-    description: A label for the thermostat settings in force, recorded on each new day, so weeks under different settings are compared by arm.
+    description: A label for the thermostat settings in force, recorded on each new day, so weeks under different settings are compared by arm. Default baseline.
   controller_from:
     name: Measure from
     description: First local day of the HVAC measurement, YYYY-MM-DD. Empty means the last 30 days.
   energy_meter:
     name: Energy meter
-    description: The statistic id of the panel's total energy. An hour it did not move is an hour the meter was not reporting, and every circuit's reading for that hour counts as missing.
+    description: Optional, with HVAC zones. The statistic id of the panel's total energy. An hour it did not move is an hour the meter was not reporting, and every circuit's reading for that hour counts as missing.
   unifi_url:
     name: UniFi URL
-    description: The UniFi OS gateway whose controller the network checks read. Absent means https://10.20.52.1; empty turns the network checks off.
+    description: The UniFi OS console whose controller the network checks read, such as https://192.168.1.1. Empty tries the host's default gateway.
   unifi_username:
     name: UniFi username
-    description: A read-only local account on the gateway, without two-factor sign-in.
+    description: Turns the network checks on. A read-only local account on the console, without two-factor sign-in.
   unifi_password:
     name: UniFi password
     description: That account's password.
   unifi_fingerprint:
     name: UniFi certificate fingerprint
-    description: SHA-256 of the gateway's certificate, hex with or without colons. Set, only that certificate is accepted; empty, the certificate is verified against the system store.
+    description: SHA-256 of the console's certificate, hex with or without colons. Set, only that certificate is accepted; empty, the certificate is verified against the system store. A refused certificate's fingerprint is shown in the finding.
   unifi_verify_tls:
     name: Verify the UniFi certificate
-    description: Off accepts any certificate when no fingerprint is set.
+    description: Off accepts any certificate when no fingerprint is set. Default on.
   isolated_networks:
     name: Isolated networks
-    description: Network names that should not reach the internal zone. A finding when UniFi does not isolate one and the first broad policy from it to the internal zone allows.
+    description: UniFi network names that should not reach the internal zone, such as IoT or Guest. A finding when UniFi does not isolate one and the first broad policy from it to the internal zone allows. Empty turns the check off.
   camera_network:
     name: Camera network
-    description: The network every UniFi Protect device should be on. Empty turns the check off.
+    description: The UniFi network every UniFi Protect device should be on. Empty turns the check off.
   network_dismiss:
     name: Dismissed network findings
-    description: Keys of network findings not to report, as each finding names them, e.g. wan_down:WAN4.
+    description: Keys of network findings not to report, as each finding names them, such as wan_down:WAN2.
   api_peers:
     name: API peers
-    description: Host names of add-ons that may read the API and start a run, besides the Supervisor and Home Assistant. Each is resolved at every request.
+    description: Host names of other add-ons that may read the API and start a run, besides the Supervisor and Home Assistant, such as a0d7b954-ssh for the SSH add-on. Each is resolved at every request.

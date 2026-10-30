@@ -173,7 +173,8 @@ def unifi():
 
 
 def opts(url, **extra):
-    return {"unifi_url": url, "unifi_username": "ro", "unifi_password": "pw", **extra}
+    # the isolation and camera rules are off until their networks are named
+    return {"unifi_url": url, "unifi_username": "ro", "unifi_password": "pw", "isolated_networks": ["IoT", "Cameras", "Guest"], "camera_network": "Cameras", **extra}
 
 
 def reported(findings) -> set[str]:
@@ -395,14 +396,42 @@ def test_an_offline_camera_keeps_its_item_and_a_name_only_record_is_read(unifi):
     assert set(items) == {"camera_network:aa:bb:cc:00:00:02"} and undecided == {"camera_network:aa:bb:cc:00:00:01", "camera_network:aa:bb:cc:00:00:03"}
 
 
-def test_off_unconfigured_and_a_refused_login(unifi):
-    assert nw.check({"unifi_url": ""}, None) == ([], None)
-    [f], state = nw.check({"unifi_url": "http://127.0.0.1:9"}, None)
-    assert f["severity"] == "warn" and f["title"] == "network checks: no UniFi account in the options" and state is None
+def test_off_without_an_account_half_an_account_said_and_a_refused_login(unifi):
+    asked = []
+    assert nw.check({}, None, gateway=lambda: asked.append(1) or "127.0.0.1") == ([], None) and asked == [], "off: nothing read"
+    assert nw.check({"unifi_url": "http://127.0.0.1:9", "isolated_networks": ["IoT"]}, None) == ([], None), "a URL alone is not an account"
     [f], state = nw.check({"unifi_username": "ro"}, None)
-    assert f["title"] == "network checks: no UniFi account in the options", "absent url means the default, which still needs the account"
+    assert f["severity"] == "warn" and f["title"] == "network checks: unifi_password is not set" and state is None
+    [f], state = nw.check({"unifi_password": "pw"}, None)
+    assert f["title"] == "network checks: unifi_username is not set"
     [f], state = nw.check(opts(unifi, unifi_password="wrong"), None)
     assert f["title"] == "network checks: UniFi login failed: HTTPError: HTTP Error 401: Unauthorized" and state is None
+
+
+def test_without_a_url_the_hosts_gateway_is_tried(unifi):
+    findings, state = nw.check(opts(""), None, gateway=lambda: unifi.removeprefix("http://"))
+    assert login_failed(findings) and state is None, "the gateway is tried on https"
+    assert f"tried https://{unifi.removeprefix('http://')}, the host's default gateway" in findings[0]["detail"]
+    [f], _ = nw.check(opts(""), None, gateway=lambda: "")
+    assert f["title"] == "network checks: no unifi_url, and the host has no default gateway to try"
+    [f], _ = nw.check(opts(""), None)
+    assert f["title"] == "network checks: no unifi_url, and the host has no default gateway to try"
+
+
+def test_the_gateway_is_the_primary_interfaces():
+    class Api:
+        def get(self, path):
+            assert path == "/network/info"
+            return {
+                "interfaces": [
+                    {"interface": "wlan0", "primary": False, "ipv4": {"gateway": "192.168.9.1"}},
+                    {"interface": "end0", "primary": True, "ipv4": {"gateway": "192.168.1.1"}},
+                ]
+            }
+
+    assert checks.host_gateway(Api()) == "192.168.1.1"
+    Api.get = lambda self, path: {"interfaces": [{"primary": True, "ipv4": {"gateway": None}}]}
+    assert checks.host_gateway(Api()) == ""
 
 
 class Ws:
@@ -486,8 +515,7 @@ def login_failed(findings) -> bool:
 
 def test_a_pinned_certificate_is_accepted_and_the_checks_run(tls_unifi):
     url, fingerprint = tls_unifi
-    colons = ":".join(fingerprint[i : i + 2] for i in range(0, 64, 2)).upper()
-    findings, state = nw.check(opts(url, unifi_fingerprint=colons), None)
+    findings, state = nw.check(opts(url, unifi_fingerprint=colon(fingerprint)), None)
     assert not login_failed(findings) and set(state["items"]) == NO_CAMERAS and FakeUnifi.logins == ["/api/auth/login"]
 
 
@@ -499,11 +527,25 @@ def test_a_certificate_that_is_not_the_pinned_one_gets_no_credentials(tls_unifi)
     assert "unifi_fingerprint" in next(f["title"] for f in findings if "login failed" in f["title"])
 
 
+def colon(fingerprint: str) -> str:
+    return ":".join(fingerprint[i : i + 2] for i in range(0, 64, 2)).upper()
+
+
 def test_without_a_pin_the_certificate_is_verified_and_a_self_signed_one_gets_no_credentials(tls_unifi):
-    url, _ = tls_unifi
+    url, fingerprint = tls_unifi
     findings, state = nw.check(opts(url), None)
     assert login_failed(findings) and state is None and FakeUnifi.logins == []
-    assert "CERTIFICATE_VERIFY_FAILED" in next(f["title"] for f in findings if "login failed" in f["title"])
+    [f] = [f for f in findings if "login failed" in f["title"]]
+    assert "CERTIFICATE_VERIFY_FAILED" in f["title"]
+    assert f"presented a certificate with SHA-256 {colon(fingerprint)}" in f["detail"], "the finding names the fingerprint to pin"
+
+
+def test_a_renewed_certificate_names_its_new_fingerprint(tls_unifi):
+    url, fingerprint = tls_unifi
+    other = ("0" if fingerprint[0] != "0" else "1") + fingerprint[1:]
+    [f] = [f for f in nw.check(opts(url, unifi_fingerprint=other), None)[0] if "login failed" in f["title"]]
+    assert colon(fingerprint) in f["detail"] and FakeUnifi.logins == []
+    assert nw.presented_fingerprint("http://127.0.0.1:9") == "" and nw.presented_fingerprint("https://127.0.0.1:9") == ""
 
 
 def test_verification_off_reads_a_self_signed_gateway(tls_unifi):

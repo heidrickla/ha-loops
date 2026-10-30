@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app-linter:
+    name: App linter
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: frenck/action-app-linter@b9cfd1bc62ba60d2c4fc96317b5f7ada5923f4a7 # v2.21.1
+        with:
+          path: ./loops
+
+  test:
+    name: Lint and test
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The server runs on the base image's python3: 3.12 on Alpine 3.21.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: >-
+          python -m pip install --quiet "ruff==0.15.21" "yamllint==1.35.1"
+          "shellcheck-py==0.10.0.1" "pytest==8.3.4"
+      - name: ruff
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: yamllint
+        run: >-
+          yamllint -d "{extends: relaxed, rules: {line-length: {max: 260}, comments: {min-spaces-from-content: 1}}}"
+          repository.yaml loops/config.yaml loops/translations/en.yaml
+          .gitea/workflows/ .github/workflows/
+      - name: shellcheck
+        run: shellcheck loops/run.sh
+      - name: Tests
+        run: python -m pytest --durations=15 -q tests
+
+  image:
+    name: Image (${{ matrix.arch }})
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Version
+        id: version
+        run: |
+          echo "version=$(sed -n 's/^version: "\(.*\)"$/\1/p' loops/config.yaml)" >> "$GITHUB_OUTPUT"
+      # Built as the Supervisor builds it on a device: from the add-on folder, nothing pushed.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./loops
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_ARCH=${{ matrix.arch }}
+            BUILD_VERSION=${{ steps.version.outputs.version }}
+          tags: loops:${{ matrix.arch }}
+          load: true
+          push: false
+      # No Supervisor here: every check fails to read, and the server still answers its health check.
+      - name: Start and answer
+        run: |
+          mkdir -p data && echo '{"run_at":"03:30","notify_target":""}' > data/options.json
+          docker run -d --name loops --platform ${{ matrix.platform }} -v "$PWD/data:/data" loops:${{ matrix.arch }}
+          for _ in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' loops)" = healthy ] && break
+            sleep 2
+          done
+          docker logs loops
+          docker exec loops python3 --version
+          [ "$(docker inspect -f '{{.State.Health.Status}}' loops)" = healthy ]

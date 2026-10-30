@@ -1,55 +1,25 @@
 name: Loops
-version: "0.12.0"
+version: "0.13.0"
 slug: loops
-description: Nightly health checks with findings that stay as checks, and the corpus of automations the household overrides
+description: Nightly health checks of Home Assistant, and the automations people undo by hand
 url: https://github.com/heidrickla/ha-loops
 arch:
   - amd64
   - aarch64
 startup: services
-boot: auto
 init: false
-stage: stable
-advanced: false
 homeassistant_api: true
 hassio_api: true
-hassio_role: manager
+hassio_role: homeassistant
 ingress: true
 ingress_port: 8095
 panel_icon: mdi:sync-circle
 panel_title: Loops
-watchdog: http://[HOST]:[PORT:8095]/healthz
+# Everything else is optional and has a default; the checks that need a service of their own
+# (Uptime Kuma, UniFi, agent memory, the options collector, HVAC zones) stay off until it is set.
 options:
   run_at: "03:30"
   notify_target: ""
-  override_window_s: 300
-  backup_max_age_days: 7
-  disk_warn_percent: 85
-  unavailable_warn_delta: 25
-  log_lines: 500
-  kuma_url: ""
-  kuma_api_key: ""
-  kuma_ignore: []
-  memory_url: "http://10.20.52.10:8765"
-  collector_url: "http://local-collector:8092"
-  hvac_zones: []
-  outdoor_temperature: ""
-  controller_arm: baseline
-  controller_from: ""
-  energy_meter: ""
-  unifi_url: "https://10.20.52.1"
-  unifi_username: ""
-  unifi_password: ""
-  unifi_fingerprint: ""
-  unifi_verify_tls: true
-  isolated_networks:
-    - IoT
-    - Cameras
-    - Guest
-  camera_network: Cameras
-  network_dismiss: []
-  api_peers:
-    - a0d7b954-ssh
 schema:
   run_at: match(^([01]\d|2[0-3]):[0-5]\d$)
   notify_target: str?
