@@ -1,9 +1,6 @@
 # Loops
 
-A Home Assistant add-on that checks the installation every night and keeps what it finds: updates, Supervisor issues, backup age, disk, entities gone unavailable, Core log errors, safety devices and locks offline, low batteries, automations that reference entities that no longer exist. It also keeps the corpus of automations people undo by hand, ranked on its page, and a record of manual actions. Findings are reported when new, on the Loops page in the sidebar and, if you choose, as a phone notification.
-
-[![Add the repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fheidrickla%2Fha-loops)
-[![Open the Loops add-on in your Home Assistant](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=5add8652_loops&repository_url=https%3A%2F%2Fgithub.com%2Fheidrickla%2Fha-loops)
+A Home Assistant add-on that checks the installation every night and keeps what it finds: updates, Supervisor issues, backup age, disk, entities gone unavailable, Core log errors, safety devices and locks offline, low batteries, automations that reference entities that no longer exist (an automation config that names only devices counts as read). It also keeps the corpus of automations people undo by hand, ranked on its page, and a record of manual actions. Findings are reported when new, on the Loops page in the sidebar and, if you choose, as a phone notification.
 
 ## Screenshots
 
@@ -11,13 +8,19 @@ A Home Assistant add-on that checks the installation every night and keeps what 
 
 A night's findings by severity, each with the check that raised it, from the test suite's example installation.
 
-## Setup
+## Install
+
+[![Add the repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fheidrickla%2Fha-loops)
+[![Open the Loops add-on in your Home Assistant](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=5add8652_loops&repository_url=https%3A%2F%2Fgithub.com%2Fheidrickla%2Fha-loops)
 
 1. Select the first button and add the repository.
 2. Select the second button, then Install, then Start. Nothing has to be typed: the checks read the Supervisor and Home Assistant APIs with the add-on's own access.
-3. Turn on Show in sidebar and open Loops. The first run happens at start; later runs at `run_at`, 03:30 local time by default.
-4. Optional: set `notify_target` to a notify service, such as `mobile_app_<device>`, for a nightly summary on your phone.
-5. Optional: turn on a check that needs a service of its own by setting its option (below). Each is off and silent until then.
+
+## Setup
+
+1. Turn on Show in sidebar and open Loops. The first run happens at start; later runs at `run_at`, 03:30 local time by default.
+2. Optional: set `notify_target` to a notify service, such as `mobile_app_<device>`, for a nightly summary on your phone.
+3. Optional: turn on a check that needs a service of its own by setting its option (below). Each is off and silent until then.
 
 | Check | Turned on by | Found without typing |
 |---|---|---|
@@ -25,8 +28,9 @@ A night's findings by severity, each with the check that raised it, from the tes
 | UniFi network checks | `unifi_username`, `unifi_password` | `unifi_url`: the host's default gateway |
 | HVAC energy per cooling degree-day | `hvac_zones`, `outdoor_temperature` | |
 | Agent-memory candidate review | `memory_url` | |
-| Options collector weekday run | `collector_url` | |
-| Automation Monitor, Breakage Radar, Agent Harness Performance Tracker | installing the integration | its sensors |
+| A collector service's weekday run | `collector_url` | |
+| Automations failing at run time, entities automations use gone unavailable, custom integrations using a removed API | installing the companion integrations that publish them | their sensors: one never seen is silent, one seen before whose sensors are gone is a failed check |
+| Agent Harness Performance Tracker regressions | installing the integration | its regression sensor |
 
 The add-on's documentation tab (`loops/DOCS.md`) describes every check and severity.
 
@@ -59,7 +63,7 @@ Only `run_at` and `notify_target` show in the form; the rest are under "Show unu
 | `controller_arm` | `baseline` | label of the thermostat settings in force, recorded per day |
 | `controller_from` | empty | first local day measured, `YYYY-MM-DD`; empty is the last 30 days |
 | `memory_url` | empty | an agent-memory service whose nightly candidate review is reported |
-| `collector_url` | empty | an options collector whose weekday run is checked |
+| `collector_url` | empty | a collector service whose `/runs` the nightly run reads to check its weekday run |
 | `api_peers` | empty | other add-ons' host names that may read the API and start a run, such as `a0d7b954-ssh` |
 
 The add-on reads the Supervisor with the `homeassistant` role: its reads are the `info` endpoints and the Core log, and it changes nothing in the Supervisor.
@@ -72,7 +76,7 @@ The add-on reads the Supervisor with the `homeassistant` role: its reads are the
 |---|---|
 | `/` | the page, static; it reads the JSON endpoints below by relative path, so it works under ingress |
 | `/healthz` | `ok`, for the container's health check |
-| `/api/latest.json` | the latest run's findings |
+| `/api/latest.json` | the latest run's findings and `optional`, which of the optional checks are on; the page shows it and the log lists it at start |
 | `/api/history.json` | the run history |
 | `/api/overrides.json` | the override ranking: per automation, `runs_undone` (one per automation run a person undid, whatever entities it changed), `overrides` (manual changes), `fired` and `rate` (runs undone over fired) over 30 days |
 | `/api/snapshot.json` | unavailable or unknown entities and ERROR/WARNING log signatures, read live, with `stop_signatures`: the occurrences logged in the last 15 s before Core exited; 502 when a read fails |
