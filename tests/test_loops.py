@@ -339,6 +339,14 @@ def test_broken_refs_names_entities_that_do_not_exist():
     assert checks.broken_refs(StatesApi(docs), broken)[0] == []
 
 
+def test_broken_refs_ignores_a_template_method_call_on_a_variable():
+    docs = {
+        "/states": [{"entity_id": "automation.door_log", "attributes": {"id": "d1"}}, {"entity_id": "lock.front_door", "state": "locked"}],
+        "/config/automation/config/d1": {"actions": [{"data": {"file": "door_events/{{ lock.split('.')[1] }}.log", "entity_id": "lock.front_door"}}]},
+    }
+    assert checks.broken_refs(StatesApi(docs), None) == ([], [])
+
+
 def test_broken_refs_that_read_nothing_is_a_failure_not_a_clean_result():
     no_ids = {"/states": [{"entity_id": "automation.yaml_only", "state": "on", "attributes": {}}]}
     with pytest.raises(RuntimeError, match="read 0"):
@@ -366,6 +374,7 @@ def test_broken_refs_skips_yaml_only_automation_and_scans_remaining_configs():
     out, broken = checks.broken_refs(StatesApi(docs), None)
     assert broken == ["light.retired_lamp"]
     assert any("automation.yaml_only" in f["detail"] and "skipped 1" in f["detail"].lower() for f in out)
+    assert all(f["severity"] == "info" for f in out if "not UI-managed" in f["title"])
     assert any(f["value"] == broken for f in out)
 
 

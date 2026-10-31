@@ -41,7 +41,7 @@ import overrides as ov
 import page
 from zoneinfo import ZoneInfo
 
-VERSION = "0.13.1"
+VERSION = "0.13.2"
 LOG = logging.getLogger("loops")
 # The Supervisor (the ingress gateway) and Core on the Supervisor network.
 FIXED_PEERS = ("172.30.32.1", "172.30.32.2")

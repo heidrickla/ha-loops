@@ -195,7 +195,8 @@ REF_DOMAINS = {
     "script",
     "scene",
 }
-REF = re.compile(r"\b([a-z_]+)\.([a-z0-9_]+)\b")
+# A name followed by "(" is a template method call (`lock.split('.')`), not an entity id.
+REF = re.compile(r"\b([a-z_]+)\.([a-z0-9_]+)\b(?!\s*\()")
 SERVICE_OBJ = re.compile(
     r"^(turn_on|turn_off|toggle|reload|set_.*|.*_set|open_cover|close_cover|stop_cover|lock|unlock|arm_.*|alarm_.*|"
     r"disarm|trigger|press|select_.*|install|increment|decrement|start|stop|create|remove|update|apply|send_.*|.*_command)$"
@@ -375,7 +376,7 @@ def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[
     broken = sorted(refs - live)
     out = _new("broken_refs", "warn", "automation or script references to entities that do not exist", dict.fromkeys(broken, ""), dict.fromkeys(previous, "") if previous is not None else None)
     if skipped:
-        out.append(finding("broken_refs", "warn", f"{len(skipped)} automation or script configs not UI-managed (404)", f"Skipped {len(skipped)}: {', '.join(skipped)}"))
+        out.append(finding("broken_refs", "info", f"{len(skipped)} automation or script configs not UI-managed (404)", f"Skipped {len(skipped)}: {', '.join(skipped)}"))
     if errors and not read and not skipped and len({message for _, _, message in errors}) == 1:
         files = ", ".join(sorted({"automations.yaml" if kind == "automation" else "scripts.yaml" for _, kind, _ in errors}))
         message = errors[0][2]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.2
+
+- A template that calls a method on a variable, such as `lock.split('.')`, is no longer read as a reference to a missing entity.
+- YAML-only automations skipped by the broken-reference check are reported as info.
+
 ## 0.13.1
 
 - The manual-action collector retries while Home Assistant starts and resumes when Core is ready.
