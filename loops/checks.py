@@ -339,23 +339,50 @@ def broken_refs(api: Api, previous: list[str] | None) -> tuple[list[dict], list[
     refs: set[str] = set()
     devices = 0
     read = 0
+    skipped: list[str] = []
+    errors: list[tuple[str, str, str]] = []
     for s in states:
         eid, attr = s["entity_id"], s.get("attributes") or {}
         if eid.startswith("automation.") and attr.get("id"):
-            text = json.dumps(api.core(f"/config/automation/config/{attr['id']}"))
+            path = f"/config/automation/config/{attr['id']}"
         elif eid.startswith("script."):
-            text = json.dumps(api.core(f"/config/script/config/{eid.split('.', 1)[1]}"))
+            path = f"/config/script/config/{eid.split('.', 1)[1]}"
         else:
+            continue
+        try:
+            text = json.dumps(api.core(path))
+        except urllib.error.HTTPError as err:
+            if err.code == 404:
+                skipped.append(eid)
+                continue
+            body = err.read().decode("utf-8", "replace")
+            try:
+                message = json.loads(body).get("message", "")
+            except (ValueError, AttributeError):
+                message = ""
+            errors.append((eid, eid.split(".", 1)[0], f"HTTP {err.code}" + (f": {message}" if message else "")))
+            continue
+        except Exception as err:
+            errors.append((eid, eid.split(".", 1)[0], f"{type(err).__name__}: {err}"))
             continue
         read += 1
         devices += text.count('"device_id"')
         refs |= {f"{d}.{o}" for d, o in REF.findall(text) if d in REF_DOMAINS and not SERVICE_OBJ.match(o)}
     # Silence must mean "looked and found nothing": no config read, or configs with neither an entity
     # nor a device in any of them, is a failure to look. UI device actions name devices only.
-    if any(s["entity_id"].startswith(("automation.", "script.")) for s in states) and not (read and (refs or devices)):
+    if any(s["entity_id"].startswith(("automation.", "script.")) for s in states) and not (read and (refs or devices)) and not (skipped or errors):
         raise RuntimeError(f"read {read} automation or script configs and found {len(refs)} entity references and {devices} device references")
     broken = sorted(refs - live)
     out = _new("broken_refs", "warn", "automation or script references to entities that do not exist", dict.fromkeys(broken, ""), dict.fromkeys(previous, "") if previous is not None else None)
+    if skipped:
+        out.append(finding("broken_refs", "warn", f"{len(skipped)} automation or script configs not UI-managed (404)", f"Skipped {len(skipped)}: {', '.join(skipped)}"))
+    if errors and not read and not skipped and len({message for _, _, message in errors}) == 1:
+        files = ", ".join(sorted({"automations.yaml" if kind == "automation" else "scripts.yaml" for _, kind, _ in errors}))
+        message = errors[0][2]
+        hint = " A !secret in a UI-managed file can cause this." if "Secrets not supported" in message else ""
+        out.append(finding("broken_refs", "warn", f"Cannot read {len(errors)} automation or script configs: {message}; check {files}", f"Affected: {', '.join(eid for eid, _, _ in errors)}.{hint}"))
+    else:
+        out.extend(finding("broken_refs", "warn", f"Cannot read {eid} config: {message}") for eid, _, message in errors)
     return out, broken
 
 

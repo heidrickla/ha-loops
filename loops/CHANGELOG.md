@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1
+
+- The manual-action collector retries while Home Assistant starts and resumes when Core is ready.
+- Broken-reference checks continue past unreadable automation or script configs. Findings name the affected item and error; YAML-only automations are counted as skipped.
+
 ## 0.13.0
 
 - A fresh install needs no option typed. The form shows `run_at` and `notify_target`; every other option is optional, with its default in the code and its description in the form.

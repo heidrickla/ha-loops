@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections
 import datetime as dt
+import io
 import json
 import sys
 import threading
@@ -241,7 +242,10 @@ class StatesApi:
         self.addons = addons
 
     def core(self, path: str):
-        return self.docs[path]
+        value = self.docs[path]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     def get(self, path: str):
         assert path == "/supervisor/info"
@@ -343,6 +347,109 @@ def test_broken_refs_that_read_nothing_is_a_failure_not_a_clean_result():
     with pytest.raises(RuntimeError, match="found 0"):
         checks.broken_refs(StatesApi(no_refs), None)
     assert checks.broken_refs(StatesApi({"/states": [{"entity_id": "light.a", "state": "on"}]}), None) == ([], [])
+
+
+def config_error(status: int, message: str) -> urllib.error.HTTPError:
+    body = json.dumps({"message": message}).encode()
+    return urllib.error.HTTPError("http://core/config", status, "error", {}, io.BytesIO(body))
+
+
+def test_broken_refs_skips_yaml_only_automation_and_scans_remaining_configs():
+    docs = {
+        "/states": [
+            {"entity_id": "automation.yaml_only", "attributes": {"id": "yaml-id"}},
+            {"entity_id": "script.goodnight", "attributes": {}},
+        ],
+        "/config/automation/config/yaml-id": config_error(404, "Not found"),
+        "/config/script/config/goodnight": {"sequence": [{"entity_id": "light.retired_lamp"}]},
+    }
+    out, broken = checks.broken_refs(StatesApi(docs), None)
+    assert broken == ["light.retired_lamp"]
+    assert any("automation.yaml_only" in f["detail"] and "skipped 1" in f["detail"].lower() for f in out)
+    assert any(f["value"] == broken for f in out)
+
+
+def test_broken_refs_names_one_unreadable_config_and_continues():
+    docs = {
+        "/states": [
+            {"entity_id": "automation.bad", "attributes": {"id": "bad"}},
+            {"entity_id": "script.goodnight", "attributes": {}},
+        ],
+        "/config/automation/config/bad": config_error(500, "Secrets not supported in this YAML file"),
+        "/config/script/config/goodnight": {"sequence": [{"entity_id": "light.retired_lamp"}]},
+    }
+    out, broken = checks.broken_refs(StatesApi(docs), None)
+    assert broken == ["light.retired_lamp"]
+    assert any("automation.bad" in f["title"] and "500" in f["title"] and "Secrets not supported" in f["title"] for f in out)
+    assert any(f["value"] == broken for f in out)
+
+
+@pytest.mark.parametrize("kind,file", [("automation", "automations.yaml"), ("script", "scripts.yaml")])
+def test_broken_refs_groups_the_same_error_when_every_config_read_fails(kind, file):
+    states = [{"entity_id": f"{kind}.{n}", "attributes": {"id": n}} for n in ("one", "two")]
+    path = f"/config/{kind}/config/"
+    docs = {"/states": states, **{path + n: config_error(500, "Secrets not supported in this YAML file") for n in ("one", "two")}}
+    out, broken = checks.broken_refs(StatesApi(docs), None)
+    assert broken == [] and len(out) == 1
+    assert out[0]["severity"] == "warn" and "500" in out[0]["title"] and file in out[0]["title"]
+    assert "Secrets not supported" in out[0]["title"]
+
+
+def test_collector_setup_retries_core_until_it_starts(tmp_path, monkeypatch, caplog):
+    class FlakyApi:
+        calls = 0
+
+        def core(self, path):
+            assert path == "/config"
+            self.calls += 1
+            if self.calls <= 3:
+                raise config_error(502, "Core starting")
+            return {"time_zone": "America/Chicago"}
+
+    api = FlakyApi()
+    loops = srv.Loops(options(), str(tmp_path), api=api)
+    stop = threading.Event()
+    waits = []
+    original_wait = stop.wait
+    stop.wait = lambda seconds: waits.append(seconds) or original_wait(0)
+    started = []
+
+    def run(collector, passed_stop, connect):
+        started.append((collector.tz.key, passed_stop, connect))
+        stop.set()
+
+    monkeypatch.setattr(srv.col.Collector, "run", run)
+    with caplog.at_level("INFO"):
+        loops.run_collector(stop)
+    assert api.calls == 4 and waits == [10, 20, 40]
+    assert started == [("America/Chicago", stop, loops.socket)]
+    assert sum("collector setup failed" in r.message for r in caplog.records) == 1
+    assert sum("collector setup recovered" in r.message for r in caplog.records) == 1
+
+
+def test_collector_setup_backoff_is_capped_and_stops(tmp_path):
+    class DownApi:
+        calls = 0
+
+        def core(self, path):
+            self.calls += 1
+            raise config_error(502, "Core starting")
+
+    api = DownApi()
+    loops = srv.Loops(options(), str(tmp_path), api=api)
+    stop = threading.Event()
+    waits = []
+
+    def wait(seconds):
+        waits.append(seconds)
+        if len(waits) == 8:
+            stop.set()
+        return stop.is_set()
+
+    stop.wait = wait
+    loops.run_collector(stop)
+    assert waits == [10, 20, 40, 80, 160, 300, 300, 300]
+    assert api.calls == 8
 
 
 def test_down_monitors_leaves_out_ignored_ones():

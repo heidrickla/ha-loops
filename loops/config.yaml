@@ -1,5 +1,5 @@
 name: Loops
-version: "0.13.0"
+version: "0.13.1"
 slug: loops
 description: Nightly health checks of Home Assistant, and the automations people undo by hand
 url: https://github.com/heidrickla/ha-loops

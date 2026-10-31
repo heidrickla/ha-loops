@@ -41,7 +41,7 @@ import overrides as ov
 import page
 from zoneinfo import ZoneInfo
 
-VERSION = "0.13.0"
+VERSION = "0.13.1"
 LOG = logging.getLogger("loops")
 # The Supervisor (the ingress gateway) and Core on the Supervisor network.
 FIXED_PEERS = ("172.30.32.1", "172.30.32.2")
@@ -131,6 +131,28 @@ class Loops:
         if self._collector is None:
             self._collector = col.Collector(self.data_dir, self.tz())
         return self._collector
+
+    def run_collector(self, stop: threading.Event) -> None:
+        backoff, last_error = 10, None
+        while not stop.is_set():
+            try:
+                collector = self.collector
+                if last_error is not None:
+                    LOG.info("collector setup recovered")
+                    last_error = None
+                backoff = 10
+                collector.run(stop, self.socket)
+                if stop.is_set():
+                    break
+                raise RuntimeError("collector exited")
+            except Exception as err:
+                error = f"{type(err).__name__}: {err}"
+                if error != last_error:
+                    LOG.warning("collector setup failed: %s", error)
+                    last_error = error
+            if stop.wait(backoff):
+                break
+            backoff = min(backoff * 2, 300)
 
     def loop7(self, now: dt.datetime) -> list[dict]:
         if not self.options.get("hvac_zones"):
@@ -358,10 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     server = serve(loops, args.port)
     stop = threading.Event()
     threading.Thread(target=loops.scheduler, args=(stop,), name="scheduler", daemon=True).start()
-    try:
-        threading.Thread(target=loops.collector.run, args=(stop, loops.socket), name="collector", daemon=True).start()
-    except Exception:  # without Home Assistant's time zone there is no local day to file by
-        LOG.exception("collector not started")
+    threading.Thread(target=loops.run_collector, args=(stop,), name="collector", daemon=True).start()
     LOG.info("serving on :%d, version %s, nightly run at %s", args.port, VERSION, loops.options.get("run_at") or "03:30")
     on = {
         "Uptime Kuma": "on" if loops.options.get("kuma_api_key") else "off (set kuma_api_key)",
