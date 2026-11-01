@@ -4,9 +4,13 @@ A Home Assistant add-on that checks the installation every night and keeps what 
 
 ## Screenshots
 
-![The Loops page with action, warn and info counts and the night's findings](docs/images/findings.png)
+![The redesigned Loops overview with severity counts and nightly findings](docs/images/dashboard-overview-preview.png)
 
-A night's findings by severity, each with the check that raised it, from the test suite's example installation.
+The redesigned overview, rendered from the committed panel with invented findings and run history.
+
+![The redesigned Loops override ranking and energy charts](docs/images/dashboard-overrides-preview.png)
+
+Override and energy details use invented data. The [earlier findings screenshot](docs/images/findings.png) is retained for history.
 
 ## Install
 
